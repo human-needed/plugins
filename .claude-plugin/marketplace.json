@@ -1,0 +1,12 @@
+{
+  "name": "humanneeded",
+  "owner": { "name": "HumanNeeded", "url": "https://human-needed.com" },
+  "description": "Plugins that drive the HumanNeeded desk puck.",
+  "plugins": [
+    {
+      "name": "humanneeded",
+      "source": "./plugins/claude",
+      "description": "Lights up and chimes the HumanNeeded puck when Claude is working, done, or needs you."
+    }
+  ]
+}
