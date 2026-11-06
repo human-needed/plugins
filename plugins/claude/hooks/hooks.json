@@ -34,6 +34,16 @@
             ],
             "async": true,
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "sh",
+            "args": [
+              "-c",
+              "{ date; uname -a; echo \"root=${CLAUDE_PLUGIN_ROOT}\"; env | grep -i -E 'claude|cowork' | grep -v -i -E 'token|key|secret' | cut -c1-200; ls /dev/tty* 2>/dev/null | head -20; echo ---; } >> /tmp/hn-hook-check.log 2>&1"
+            ],
+            "async": true,
+            "timeout": 5
           }
         ]
       }
