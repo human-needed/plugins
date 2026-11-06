@@ -5,6 +5,7 @@
 #
 # Always exits 0 within ~2 s and is silent for agent events, so a missing puck never
 # disturbs the agent. Other commands print the puck's reply.
+# Every run adds a line to %USERPROFILE%\.humanneeded\hn.log (for troubleshooting).
 
 param([string]$Command = 'hello', [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest = @())
 
@@ -12,6 +13,7 @@ $ErrorActionPreference = 'Stop'
 $clock = [Diagnostics.Stopwatch]::StartNew()
 $budgetMs = 2000
 $cacheFile = Join-Path $env:USERPROFILE '.humanneeded\port'
+$logFile = Join-Path $env:USERPROFILE '.humanneeded\hn.log'
 $states = 'working', 'needs', 'done', 'idle', 'end'
 
 # COM ports of plugged-in pucks: USB devices whose serial number starts with "HN".
@@ -71,6 +73,20 @@ function Send-ToPuck([string]$line) {
     return $null
 }
 
+# One line per run: time, what was sent, the reply, and where the script ran from
+# (shows which app's plugin copy called it). Keeps the last 200 lines.
+function Write-Log([string]$sent, [string]$reply) {
+    try {
+        New-Item -ItemType Directory -Force (Split-Path $logFile) | Out-Null
+        $entry = '{0:yyyy-MM-dd HH:mm:ss}  {1}  -> {2}  ({3} ms, {4})' -f (Get-Date), $sent,
+            $(if ($reply) { $reply } else { 'no puck' }), $clock.ElapsedMilliseconds, $PSScriptRoot
+        Add-Content $logFile $entry
+        if ((Get-Item $logFile).Length -gt 64KB) {
+            Set-Content $logFile (Get-Content $logFile | Select-Object -Last 200)
+        }
+    } catch {}
+}
+
 # session_id from the hook's JSON on stdin, or "default".
 function Read-SessionId {
     if (-not [Console]::IsInputRedirected) { return 'default' }
@@ -85,7 +101,8 @@ try {
     $Command = $Command.ToLower()
     if ($states -contains $Command) {
         $agent = if ($Rest.Count -gt 0) { $Rest[0] } else { 'claude' }
-        $null = Send-ToPuck "EV $Command $(Read-SessionId) $agent"
+        $line = "EV $Command $(Read-SessionId) $agent"
+        Write-Log $line (Send-ToPuck $line)
     } else {
         $line = switch ($Command) {
             'set'    { "SET $($Rest[0]) $($Rest[1])" }
@@ -101,6 +118,7 @@ try {
             'usage: hn <working|needs|done|idle|end> [agent] | set <k> <v> | get <k|all> | mute <min> | test <state> | hello | status | clear'
         } else {
             $reply = Send-ToPuck $line
+            Write-Log $line $reply
             if ($reply) { $reply } else { 'HumanNeeded puck not found (is it plugged in?)' }
         }
     }

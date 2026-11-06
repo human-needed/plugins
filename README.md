@@ -41,6 +41,8 @@ powershell -ExecutionPolicy Bypass -File host\hn.ps1 test needs
 
 It finds the puck by its `HN…` USB serial number, caches the COM port in
 `%USERPROFILE%\.humanneeded\port`, always exits 0, and gives up silently after ~2 s.
+Each run adds a line to `%USERPROFILE%\.humanneeded\hn.log` (time, command, the puck's reply or
+"no puck", and the plugin folder it ran from), so you can see whether an app's hooks are firing.
 
 To release a plugin change, bump `version` in `plugins/claude/.claude-plugin/plugin.json` and push.
 Users get it with `claude plugin marketplace update humanneeded`, or automatically if they turn on
