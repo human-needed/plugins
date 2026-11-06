@@ -20,6 +20,20 @@
             ],
             "async": true,
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": [
+              "-NoProfile",
+              "-NonInteractive",
+              "-WindowStyle",
+              "Hidden",
+              "-Command",
+              "$d = Join-Path $env:USERPROFILE '.humanneeded'; New-Item -ItemType Directory -Force $d | Out-Null; Add-Content (Join-Path $d 'hook-check.log') ('{0:yyyy-MM-dd HH:mm:ss}  UserPromptSubmit  arg=${CLAUDE_PLUGIN_ROOT}  env=' -f (Get-Date) + $env:CLAUDE_PLUGIN_ROOT + '  entry=' + $env:CLAUDE_CODE_ENTRYPOINT)"
+            ],
+            "async": true,
+            "timeout": 5
           }
         ]
       }
