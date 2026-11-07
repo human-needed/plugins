@@ -11,7 +11,7 @@ $utf8 = New-Object Text.UTF8Encoding $false
 [Console]::OutputEncoding = $utf8
 $hn = Join-Path $PSScriptRoot 'hn.ps1'
 $logFile = Join-Path $env:USERPROFILE '.humanneeded\hn.log'
-$version = '0.1.4'
+$version = '0.1.5'
 
 function Write-Log([string]$text) {
     try {
@@ -28,7 +28,7 @@ function Send-Message($message) {
 $tools = @(
     @{
         name        = 'set_state'
-        description = 'Used by the HumanNeeded plugin itself to show a session state on the puck. Do not call it.'
+        description = 'Shows a session state on the HumanNeeded puck. The plugin calls it itself; call it only when the user asks to test the puck connection.'
         inputSchema = @{
             type       = 'object'
             properties = @{

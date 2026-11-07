@@ -7,17 +7,26 @@ import type { EngineInterface, Register } from 'claude-code'
 
 type State = 'working' | 'needs' | 'done' | 'end'
 
-let server: string | undefined
+// Where set_state lives, as $.mcp.call takes it: the plugin's own server in a local
+// session; in a cloud one, the desktop app's bridge ("remote-devices"), which lists it as
+// mcp__remote-devices__plugin_humanneeded_puck__set_state.
+type Target = { server: string; tool: string }
+
+let target: Target | undefined
 let lastSent: string | undefined
 let reported = false
 
-// The connector's name as $.mcp.call takes it, found once per session.
-async function findServer($: EngineInterface): Promise<{ server?: string; refused?: string }> {
-  if (server) return { server }
+// Found once per session.
+async function findTarget($: EngineInterface): Promise<{ target?: Target; refused?: string }> {
+  if (target) return { target }
+  const listed = (await $.tool.list()).find(t => t.mcp && /humanneeded_puck/i.test(t.name) && t.name.endsWith('__set_state'))
+  if (listed) {
+    // mcp__<server>__<tool>: the server name holds no "__"; the tool's may.
+    const [, server, ...tool] = listed.name.split('__')
+    return { target: (target = { server: server!, tool: tool.join('__') }) }
+  }
   const connected = await $.mcp.connect('puck')
-  if (connected.isConnected) return { server: (server = connected.server) }
-  const tool = (await $.tool.list()).find(t => t.mcp && /puck|humanneeded/i.test(t.name) && t.name.endsWith('__set_state'))
-  if (tool) return { server: (server = tool.name.slice('mcp__'.length, -'__set_state'.length)) }
+  if (connected.isConnected) return { target: (target = { server: connected.server, tool: 'set_state' }) }
   return { refused: `${connected.reason}: ${connected.message}` }
 }
 
@@ -29,10 +38,10 @@ async function send($: EngineInterface, state: State, sessionId: string) {
 
   const started = Date.now()
   let outcome: string
-  const found = await findServer($)
-  if (found.server) {
+  const found = await findTarget($)
+  if (found.target) {
     try {
-      const result = await $.mcp.call(found.server, 'set_state', { state, session_id: sessionId, agent: 'claude' })
+      const result = await $.mcp.call(found.target.server, found.target.tool, { state, session_id: sessionId, agent: 'claude' })
       outcome = `${result.isError ? 'error' : 'ok'}: ${result.content.map(c => c.text ?? c.type).join(' ')}`
     } catch (error) {
       outcome = `call failed: ${error}`
@@ -48,7 +57,7 @@ async function send($: EngineInterface, state: State, sessionId: string) {
     const servers = [...new Set((await $.tool.list()).filter(t => t.mcp).map(t => t.name.split('__')[1]))]
     const text = [
       `HumanNeeded check: ${state} -> ${outcome} (${Date.now() - started} ms)`,
-      `connector: ${found.server ?? 'not found'}`,
+      `connector: ${found.target ? `${found.target.server} / ${found.target.tool}` : 'not found'}`,
       `entrypoint: ${await $.env.get('CLAUDE_CODE_ENTRYPOINT')}`,
       `MCP servers: ${servers.join(', ') || 'none'}`,
     ].join('\n')
