@@ -18,6 +18,12 @@ answer, green when it finishes. Ask Claude "test my puck" or "make needs purple"
 
 Remove it with `claude plugin uninstall humanneeded@humanneeded`.
 
+**Cloud sessions (Cowork, claude.ai/code): being tested.** Their hooks run in Anthropic's cloud,
+not on your PC. The plugin's hooks module (`hooks/register.ts`) sends each state to the plugin's
+local connector (`scripts/hn-mcp.ps1`), which the Claude desktop app runs on the PC the session is
+linked to. The first state of each cloud session adds a "HumanNeeded check" note to the
+conversation saying whether it got through (the model doesn't read it).
+
 Codex and Cursor plugins, and macOS support, are coming.
 
 ## Layout
@@ -26,9 +32,11 @@ Codex and Cursor plugins, and macOS support, are coming.
 .claude-plugin/marketplace.json   Claude Code marketplace (this repo)
 plugins/claude/                   Claude Code plugin: hooks + "humanneeded" skill
 host/hn.ps1                       Windows script the hooks call; talks to the puck over USB serial
+host/hn-mcp.ps1                   local connector (MCP over stdio): set_state -> hn.ps1
+plugins/claude/hooks/register.ts  hooks module: cloud sessions -> the local connector
 ```
 
-`plugins/*/scripts/hn.ps1` is a copy of `host/hn.ps1`, because installed plugins can't reach outside
+`plugins/*/scripts/` holds copies of `host/hn.ps1` and `host/hn-mcp.ps1`, because installed plugins can't reach outside
 their folder. After editing anything in `host/`, run `host/sync-plugins.ps1`.
 
 Try the script by hand:

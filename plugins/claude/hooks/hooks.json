@@ -1,4 +1,7 @@
 {
+  "modules": [
+    "./register.ts"
+  ],
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -17,30 +20,6 @@
               "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
               "working",
               "claude"
-            ],
-            "async": true,
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "powershell.exe",
-            "args": [
-              "-NoProfile",
-              "-NonInteractive",
-              "-WindowStyle",
-              "Hidden",
-              "-Command",
-              "$d = Join-Path $env:USERPROFILE '.humanneeded'; New-Item -ItemType Directory -Force $d | Out-Null; Add-Content (Join-Path $d 'hook-check.log') ('{0:yyyy-MM-dd HH:mm:ss}  UserPromptSubmit  arg=${CLAUDE_PLUGIN_ROOT}  env=' -f (Get-Date) + $env:CLAUDE_PLUGIN_ROOT + '  entry=' + $env:CLAUDE_CODE_ENTRYPOINT)"
-            ],
-            "async": true,
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "sh",
-            "args": [
-              "-c",
-              "{ date; uname -a; echo \"root=${CLAUDE_PLUGIN_ROOT}\"; env | grep -i -E 'claude|cowork' | grep -v -i -E 'token|key|secret' | cut -c1-200; ls /dev/tty* 2>/dev/null | head -20; echo ---; } >> /tmp/hn-hook-check.log 2>&1"
             ],
             "async": true,
             "timeout": 5
