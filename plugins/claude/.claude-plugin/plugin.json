@@ -1,6 +1,6 @@
 {
   "name": "humanneeded",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Lights up and chimes the HumanNeeded puck when Claude is working, done, or needs you.",
   "author": {
     "name": "HumanNeeded"

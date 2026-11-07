@@ -15,6 +15,15 @@ type Target = { server: string; tool: string }
 let target: Target | undefined
 let lastSent: string | undefined
 let reported = false
+const BRIDGE: Target = { server: 'remote-devices', tool: 'plugin_humanneeded_puck__set_state' }
+
+// Temporary: in cloud sessions, a log inside the VM that Claude can read back
+// (cat /tmp/hn-module.log), to see whether the module runs and what it finds.
+const lines: string[] = []
+async function trace($: EngineInterface, text: string) {
+  lines.push(`${new Date().toISOString()}  ${text}`)
+  await $.fs.write('/tmp/hn-module.log', lines.slice(-200).join('\n') + '\n').catch(() => {})
+}
 
 // Found once per session.
 async function findTarget($: EngineInterface): Promise<{ target?: Target; refused?: string }> {
@@ -27,6 +36,8 @@ async function findTarget($: EngineInterface): Promise<{ target?: Target; refuse
   }
   const connected = await $.mcp.connect('puck')
   if (connected.isConnected) return { target: (target = { server: connected.server, tool: 'set_state' }) }
+  // Cowork loads the bridge's tools on demand, so set_state may not be listed yet.
+  if ((await $.env.get('CLAUDE_CODE_REMOTE')) === 'true') return { target: BRIDGE, refused: `${connected.reason}: ${connected.message}` }
   return { refused: `${connected.reason}: ${connected.message}` }
 }
 
@@ -45,10 +56,12 @@ async function send($: EngineInterface, state: State, sessionId: string) {
       outcome = `${result.isError ? 'error' : 'ok'}: ${result.content.map(c => c.text ?? c.type).join(' ')}`
     } catch (error) {
       outcome = `call failed: ${error}`
+      if (found.target === BRIDGE) target = undefined
     }
   } else {
     outcome = `no connector (${found.refused})`
   }
+  await trace($, `${state} ${sessionId} -> ${outcome} (${Date.now() - started} ms, via ${found.target ? `${found.target.server} / ${found.target.tool}` : 'none'}${found.refused ? `; connect: ${found.refused}` : ''})`)
 
   // Temporary: the first send of each session reports what it found, so a Cowork
   // test shows whether the cloud session reaches the PC. The model never reads it.
@@ -73,6 +86,14 @@ async function relay<R>($: EngineInterface, state: State, sessionId: string, res
 
 // Each hook's .catch hands the event on unchanged if the hook fails.
 export const register: Register = on => {
+  on('session.start', async ($, e, next) => {
+    if ((await $.env.get('CLAUDE_CODE_REMOTE')) === 'true') {
+      const tools = await $.tool.list()
+      const mcp = tools.filter(t => t.mcp)
+      await trace($, `loaded 0.1.6: ${tools.length} tools, ${mcp.length} MCP; puck: ${mcp.filter(t => /puck|humanneeded/i.test(t.name)).map(t => t.name).join(', ') || 'none'}; servers: ${[...new Set(mcp.map(t => t.name.split('__')[1]))].join(', ') || 'none'}`)
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
   on('classic.UserPromptSubmit', ($, e, next) => relay($, 'working', e.session_id, next(e))).catch(($, e, next) => next(e))
   on('classic.PostToolUse', ($, e, next) => relay($, 'working', e.session_id, next(e))).catch(($, e, next) => next(e))
   on('classic.Notification', ($, e, next) =>
