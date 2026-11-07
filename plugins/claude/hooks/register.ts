@@ -89,7 +89,7 @@ async function relay<R>($: EngineInterface, state: State, sessionId: string, res
 async function withReport<R extends { additionalContext?: string[] }>($: EngineInterface, sessionId: string, rest: Promise<R>) {
   const result = await relay($, 'working', sessionId, rest)
   if ((await $.env.get('CLAUDE_CODE_REMOTE')) !== 'true') return result
-  const report = `HumanNeeded module 0.1.10 trace (session ${sessionId}):\n${lines.join('\n') || '(empty)'}`
+  const report = `HumanNeeded module 0.1.11 trace (session ${sessionId}):\n${lines.join('\n') || '(empty)'}`
   return { ...result, additionalContext: [...(result.additionalContext ?? []), report] }
 }
 
@@ -99,7 +99,7 @@ export const register: Register = on => {
     if ((await $.env.get('CLAUDE_CODE_REMOTE')) === 'true') {
       const tools = await $.tool.list()
       const mcp = tools.filter(t => t.mcp)
-      await trace($, `loaded 0.1.10: ${tools.length} tools, ${mcp.length} MCP; puck: ${mcp.filter(t => /puck|humanneeded/i.test(t.name)).map(t => t.name).join(', ') || 'none'}; servers: ${[...new Set(mcp.map(t => t.name.split('__')[1]))].join(', ') || 'none'}`)
+      await trace($, `loaded 0.1.11: ${tools.length} tools, ${mcp.length} MCP; puck: ${mcp.filter(t => /puck|humanneeded/i.test(t.name)).map(t => t.name).join(', ') || 'none'}; servers: ${[...new Set(mcp.map(t => t.name.split('__')[1]))].join(', ') || 'none'}`)
     }
     return next(e)
   }).catch(($, e, next) => next(e))
