@@ -11,7 +11,7 @@ $utf8 = New-Object Text.UTF8Encoding $false
 [Console]::OutputEncoding = $utf8
 $hn = Join-Path $PSScriptRoot 'hn.ps1'
 $logFile = Join-Path $env:USERPROFILE '.humanneeded\hn.log'
-$version = '0.1.9'
+$version = '0.1.10'
 
 function Write-Log([string]$text) {
     try {
@@ -50,7 +50,7 @@ function Invoke-SetState($arguments) {
     Write-Log "set_state $state $session $agent"
     $null = (@{ session_id = $session } | ConvertTo-Json -Compress) |
         & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $hn $state $agent 2>&1
-    return 'OK'
+    return "HumanNeeded check: the puck connector on $env:COMPUTERNAME got set_state $state for session $session"
 }
 
 Write-Log "started $version (pid $PID, $PSScriptRoot)"
@@ -69,7 +69,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
             'tools/call' {
                 if ($request.params.name -ne 'set_state') { throw "unknown tool $($request.params.name)" }
                 $text = Invoke-SetState $request.params.arguments
-                $result = @{ content = @(@{ type = 'text'; text = $text }); isError = ($text -ne 'OK') }
+                $result = @{ content = @(@{ type = 'text'; text = $text }); isError = ($text -like 'unknown state*') }
             }
             'ping' { $result = @{} }
             default {

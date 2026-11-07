@@ -37,8 +37,7 @@
           },
           {
             "type": "command",
-            "command": "{ printf \"%s UserPromptSubmit \" \"$(date -u +%FT%TZ)\"; head -c 600; echo; } >> /tmp/hn-hook.log 2>/dev/null || true",
-            "async": true,
+            "command": "echo \"HumanNeeded hook check: a plugin command hook ran on host $(hostname) ($(uname -s)), entrypoint ${CLAUDE_CODE_ENTRYPOINT:-none}, remote ${CLAUDE_CODE_REMOTE:-none}\"",
             "timeout": 5
           }
         ]
@@ -112,12 +111,6 @@
               "agent": "claude"
             },
             "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "{ printf \"%s PostToolUse \" \"$(date -u +%FT%TZ)\"; head -c 600; echo; } >> /tmp/hn-hook.log 2>/dev/null || true",
-            "async": true,
-            "timeout": 5
           }
         ]
       }
@@ -152,12 +145,6 @@
               "session_id": "${session_id}",
               "agent": "claude"
             },
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "{ printf \"%s Stop \" \"$(date -u +%FT%TZ)\"; head -c 600; echo; } >> /tmp/hn-hook.log 2>/dev/null || true",
-            "async": true,
             "timeout": 5
           }
         ]
