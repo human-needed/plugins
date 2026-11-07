@@ -84,17 +84,26 @@ async function relay<R>($: EngineInterface, state: State, sessionId: string, res
   return result
 }
 
+// Temporary: in cloud sessions, hands the module's trace to the model with each prompt,
+// since the engine's /tmp may not be the one Claude's shell sees.
+async function withReport<R extends { additionalContext?: string[] }>($: EngineInterface, sessionId: string, rest: Promise<R>) {
+  const result = await relay($, 'working', sessionId, rest)
+  if ((await $.env.get('CLAUDE_CODE_REMOTE')) !== 'true') return result
+  const report = `HumanNeeded module 0.1.7 trace (session ${sessionId}):\n${lines.join('\n') || '(empty)'}`
+  return { ...result, additionalContext: [...(result.additionalContext ?? []), report] }
+}
+
 // Each hook's .catch hands the event on unchanged if the hook fails.
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     if ((await $.env.get('CLAUDE_CODE_REMOTE')) === 'true') {
       const tools = await $.tool.list()
       const mcp = tools.filter(t => t.mcp)
-      await trace($, `loaded 0.1.6: ${tools.length} tools, ${mcp.length} MCP; puck: ${mcp.filter(t => /puck|humanneeded/i.test(t.name)).map(t => t.name).join(', ') || 'none'}; servers: ${[...new Set(mcp.map(t => t.name.split('__')[1]))].join(', ') || 'none'}`)
+      await trace($, `loaded 0.1.7: ${tools.length} tools, ${mcp.length} MCP; puck: ${mcp.filter(t => /puck|humanneeded/i.test(t.name)).map(t => t.name).join(', ') || 'none'}; servers: ${[...new Set(mcp.map(t => t.name.split('__')[1]))].join(', ') || 'none'}`)
     }
     return next(e)
   }).catch(($, e, next) => next(e))
-  on('classic.UserPromptSubmit', ($, e, next) => relay($, 'working', e.session_id, next(e))).catch(($, e, next) => next(e))
+  on('classic.UserPromptSubmit', ($, e, next) => withReport($, e.session_id, next(e))).catch(($, e, next) => next(e))
   on('classic.PostToolUse', ($, e, next) => relay($, 'working', e.session_id, next(e))).catch(($, e, next) => next(e))
   on('classic.Notification', ($, e, next) =>
     e.notification_type === 'permission_prompt' || e.notification_type === 'idle_prompt'
