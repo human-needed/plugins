@@ -23,6 +23,17 @@
             ],
             "async": true,
             "timeout": 5
+          },
+          {
+            "type": "mcp_tool",
+            "server": "remote-devices",
+            "tool": "plugin_humanneeded_puck__set_state",
+            "input": {
+              "state": "working",
+              "session_id": "${session_id}",
+              "agent": "claude"
+            },
+            "timeout": 5
           }
         ]
       }
@@ -47,6 +58,17 @@
               "claude"
             ],
             "async": true,
+            "timeout": 5
+          },
+          {
+            "type": "mcp_tool",
+            "server": "remote-devices",
+            "tool": "plugin_humanneeded_puck__set_state",
+            "input": {
+              "state": "needs",
+              "session_id": "${session_id}",
+              "agent": "claude"
+            },
             "timeout": 5
           }
         ]
@@ -73,6 +95,17 @@
             ],
             "async": true,
             "timeout": 5
+          },
+          {
+            "type": "mcp_tool",
+            "server": "remote-devices",
+            "tool": "plugin_humanneeded_puck__set_state",
+            "input": {
+              "state": "working",
+              "session_id": "${session_id}",
+              "agent": "claude"
+            },
+            "timeout": 5
           }
         ]
       }
@@ -97,6 +130,17 @@
             ],
             "async": true,
             "timeout": 5
+          },
+          {
+            "type": "mcp_tool",
+            "server": "remote-devices",
+            "tool": "plugin_humanneeded_puck__set_state",
+            "input": {
+              "state": "done",
+              "session_id": "${session_id}",
+              "agent": "claude"
+            },
+            "timeout": 5
           }
         ]
       }
@@ -120,6 +164,34 @@
               "claude"
             ],
             "async": true,
+            "timeout": 5
+          },
+          {
+            "type": "mcp_tool",
+            "server": "remote-devices",
+            "tool": "plugin_humanneeded_puck__set_state",
+            "input": {
+              "state": "end",
+              "session_id": "${session_id}",
+              "agent": "claude"
+            },
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "remote-devices",
+            "tool": "plugin_humanneeded_puck__set_state",
+            "input": {
+              "state": "needs",
+              "session_id": "${session_id}",
+              "agent": "claude"
+            },
             "timeout": 5
           }
         ]
