@@ -23,12 +23,14 @@
           },
           {
             "type": "command",
-            "command": "sh",
+            "command": "bash",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/sync-probe.sh",
-              "prompt"
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh",
+              "working",
+              "claude"
             ],
-            "timeout": 10
+            "cloud": "device",
+            "timeout": 5
           }
         ]
       }
@@ -54,6 +56,18 @@
             ],
             "async": true,
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh",
+              "needs",
+              "claude"
+            ],
+            "cloud": "device",
+            "timeout": 5,
+            "async": true
           }
         ]
       }
@@ -79,6 +93,18 @@
             ],
             "async": true,
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh",
+              "working",
+              "claude"
+            ],
+            "cloud": "device",
+            "timeout": 5,
+            "async": true
           }
         ]
       }
@@ -106,13 +132,15 @@
           },
           {
             "type": "command",
-            "command": "sh",
+            "command": "bash",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/sync-probe.sh",
-              "stop"
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh",
+              "done",
+              "claude"
             ],
-            "async": true,
-            "timeout": 10
+            "cloud": "device",
+            "timeout": 5,
+            "async": true
           }
         ]
       }
@@ -137,6 +165,18 @@
             ],
             "async": true,
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh",
+              "end",
+              "claude"
+            ],
+            "cloud": "device",
+            "timeout": 5,
+            "async": true
           }
         ]
       }

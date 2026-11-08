@@ -24,7 +24,13 @@ local connector (`scripts/hn-mcp.ps1`), which the Claude desktop app runs on the
 linked to. The first state of each cloud session adds a "HumanNeeded check" note to the
 conversation saying whether it got through (the model doesn't read it).
 
-Codex and Cursor plugins, and macOS support, are coming.
+**macOS (being tested, 0.1.15):** the hooks also call `scripts/hn.sh`, a bash version of `hn.ps1`
+that finds the puck's `/dev/cu.usbmodem…` port by its `HN…` serial number. Those hooks are marked
+`"cloud": "device"`, so when the Claude app on a Mac offers to run this machine's hooks for cloud
+sessions, cloud Cowork/Code sessions can drive the puck too. Try it by hand:
+`bash scripts/hn.sh hello`. Each run adds a line to `~/.humanneeded/hn.log`.
+
+Codex and Cursor plugins are coming.
 
 ## Layout
 
