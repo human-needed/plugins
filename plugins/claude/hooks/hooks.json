@@ -22,30 +22,13 @@
             "timeout": 5
           },
           {
-            "type": "mcp_tool",
-            "server": "remote-devices",
-            "tool": "plugin_humanneeded_puck__set_state",
-            "input": {
-              "state": "working",
-              "session_id": "${session_id}",
-              "agent": "claude"
-            },
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "echo \"HumanNeeded 0.1.13 hook check: a plugin command hook ran on host $(hostname) ($(uname -s)), entrypoint ${CLAUDE_CODE_ENTRYPOINT:-none}, remote ${CLAUDE_CODE_REMOTE:-none}\"",
-            "timeout": 5
-          },
-          {
             "type": "command",
             "command": "sh",
             "args": [
-              "-c",
-              "{ date; uname -a; echo \"root=${CLAUDE_PLUGIN_ROOT}\"; claude --version 2>/dev/null; echo ---; } >> /tmp/hn-hook-check.log 2>&1"
+              "${CLAUDE_PLUGIN_ROOT}/scripts/sync-probe.sh",
+              "prompt"
             ],
-            "async": true,
-            "timeout": 5
+            "timeout": 10
           }
         ]
       }
@@ -71,17 +54,6 @@
             ],
             "async": true,
             "timeout": 5
-          },
-          {
-            "type": "mcp_tool",
-            "server": "remote-devices",
-            "tool": "plugin_humanneeded_puck__set_state",
-            "input": {
-              "state": "needs",
-              "session_id": "${session_id}",
-              "agent": "claude"
-            },
-            "timeout": 5
           }
         ]
       }
@@ -106,17 +78,6 @@
               "claude"
             ],
             "async": true,
-            "timeout": 5
-          },
-          {
-            "type": "mcp_tool",
-            "server": "remote-devices",
-            "tool": "plugin_humanneeded_puck__set_state",
-            "input": {
-              "state": "working",
-              "session_id": "${session_id}",
-              "agent": "claude"
-            },
             "timeout": 5
           }
         ]
@@ -144,15 +105,14 @@
             "timeout": 5
           },
           {
-            "type": "mcp_tool",
-            "server": "remote-devices",
-            "tool": "plugin_humanneeded_puck__set_state",
-            "input": {
-              "state": "done",
-              "session_id": "${session_id}",
-              "agent": "claude"
-            },
-            "timeout": 5
+            "type": "command",
+            "command": "sh",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/sync-probe.sh",
+              "stop"
+            ],
+            "async": true,
+            "timeout": 10
           }
         ]
       }
@@ -176,17 +136,6 @@
               "claude"
             ],
             "async": true,
-            "timeout": 5
-          },
-          {
-            "type": "mcp_tool",
-            "server": "remote-devices",
-            "tool": "plugin_humanneeded_puck__set_state",
-            "input": {
-              "state": "end",
-              "session_id": "${session_id}",
-              "agent": "claude"
-            },
             "timeout": 5
           }
         ]
