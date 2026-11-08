@@ -9,7 +9,7 @@
 # UserPromptSubmit that says where the hook ran (on this Mac, or in a cloud VM).
 # Every run adds a line to ~/.humanneeded/hn.log.
 
-VERSION=0.1.15
+VERSION=0.1.16
 os="$(uname -s)"
 dir="$HOME/.humanneeded"
 log="$dir/hn.log"

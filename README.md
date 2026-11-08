@@ -30,6 +30,12 @@ that finds the puck's `/dev/cu.usbmodem…` port by its `HN…` serial number. T
 sessions, cloud Cowork/Code sessions can drive the puck too. Try it by hand:
 `bash scripts/hn.sh hello`. Each run adds a line to `~/.humanneeded/hn.log`.
 
+**Cloud egress probe (0.1.16, test):** `scripts/egress.sh` runs on each prompt but does nothing
+unless it is inside a cloud VM (Linux with `CLAUDE_CODE_REMOTE=true`). There it tries
+api.github.com, sts.amazonaws.com, firestore.googleapis.com and ntfy.sh (3 s each, in parallel)
+and prints one `HumanNeeded 0.1.16 egress:` line with each host's HTTP code, or `000/x<curl exit>`
+when blocked. This decides whether a relay to the PC is possible.
+
 Codex and Cursor plugins are coming.
 
 ## Layout
