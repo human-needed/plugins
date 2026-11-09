@@ -17,7 +17,7 @@
 #    HMAC-signed; the PC checks the signature.
 # Prints one line on UserPromptSubmit; silent otherwise. Always exits 0.
 
-VERSION=0.1.24
+VERSION=0.1.25
 # The relay Lambda's function URL: Cowork sessions connected to a PC can't reach execute-api hosts.
 RELAY_URL="${HN_RELAY_URL:-https://tcxdfuid4msoglniqenx2qhnza0gwwyq.lambda-url.us-east-2.on.aws}"
 
