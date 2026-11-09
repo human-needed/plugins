@@ -9,7 +9,7 @@
 # UserPromptSubmit that says where the hook ran (on this Mac, or in a cloud VM).
 # Every run adds a line to ~/.humanneeded/hn.log.
 
-VERSION=0.1.17
+VERSION=0.1.18
 os="$(uname -s)"
 dir="$HOME/.humanneeded"
 log="$dir/hn.log"
@@ -34,7 +34,7 @@ where="$(hostname -s 2>/dev/null || hostname) ($os), entrypoint ${CLAUDE_CODE_EN
 # Not a Mac: a cloud VM (Linux) or Windows. Nothing to drive here; say so on the
 # prompt hook so a cloud test shows where the hook ran, then stop.
 if [ "$os" != "Darwin" ]; then
-  # Cloud Claude VM: send the state through the HumanNeeded relay to the PC (test, 0.1.17).
+  # Cloud Claude VM: send the state through the HumanNeeded relay to the PC (test, 0.1.18).
   if [ "$is_event" = 1 ] && [ "$os" = "Linux" ] && [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
     sh "$(dirname "$0")/relay.sh" "$cmd" "${1:-claude}" "$session_id" "$event_name"
     exit 0

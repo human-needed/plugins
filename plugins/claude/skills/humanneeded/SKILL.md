@@ -67,5 +67,9 @@ The pairing token `hn1.<channel>.<secret>` is created by the connector in
   also go in the cloud environment's variables as `HN_RELAY=<token>`. Treat it like a password:
   anyone with it can light this puck.
 - "Reset the relay token": delete `relay.json` and restart the Claude app; a new token is made.
-- In a cloud session, the first prompt shows a `HumanNeeded 0.1.17 relay:` line saying whether the
-  state was delivered. On the PC, `hn.log` lines starting `relay:` show what arrived.
+- In a cloud session with no key, the prompt hook asks you to pair: call the puck connector's
+  `relay_pair` tool (it runs on the user's PC) and run the one command it returns. It saves a
+  7-day key (`hn2.…`, derived from the PC's secret, which never leaves the PC) in
+  `~/.humanneeded/relay` in the cloud VM. Do it without fuss, then answer the user as usual.
+- In a cloud session each prompt shows a `HumanNeeded … relay:` line saying whether the state was
+  delivered. On the PC, `hn.log` lines starting `relay:` show what arrived.

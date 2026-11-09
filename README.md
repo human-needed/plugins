@@ -30,15 +30,18 @@ that finds the puck's `/dev/cu.usbmodem…` port by its `HN…` serial number. T
 sessions, cloud Cowork/Code sessions can drive the puck too. Try it by hand:
 `bash scripts/hn.sh hello`. Each run adds a line to `~/.humanneeded/hn.log`.
 
-**Cloud sessions through the relay (0.1.17, test):** cloud Claude sessions (claude.ai/code,
+**Cloud sessions through the relay (0.1.18, test):** cloud Claude sessions (claude.ai/code,
 cloud Cowork) run their hooks in a Linux VM that can't reach your PC, but can reach AWS. There
 `scripts/hn.sh` hands each state to `scripts/relay.sh`, which signs it (HMAC-SHA256) and POSTs
 it to the HumanNeeded relay (`relay/`: API Gateway + Lambda). The puck connector the Claude app
 runs on your PC (`scripts/hn-mcp.ps1`) keeps a WebSocket open to the relay, checks each
 signature, and passes the state to `hn.ps1`. Messages carry only the state, a hash of the
 session id, the agent name and a timestamp; the relay stores no messages and never sees the
-secret. Local sessions never use the relay. Pairing: ask Claude on the PC for your relay token
-and paste it into the plugin's **relay** option.
+secret. Local sessions never use the relay. Pairing is automatic: when a cloud session has no key,
+the prompt hook asks Claude to call the connector's `relay_pair` tool (through the Claude app's
+link to your PC) and save the 7-day key it returns in the VM. Cowork doesn't pass plugin
+options into its VM; for claude.ai/code you can instead put your token in the environment's
+variables as `HN_RELAY`.
 
 Codex and Cursor plugins are coming.
 

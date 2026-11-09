@@ -11,7 +11,7 @@ $utf8 = New-Object Text.UTF8Encoding $false
 [Console]::OutputEncoding = $utf8
 $hn = Join-Path $PSScriptRoot 'hn.ps1'
 $logFile = Join-Path $env:USERPROFILE '.humanneeded\hn.log'
-$version = '0.1.17'
+$version = '0.1.18'
 
 function Write-Log([string]$text) {
     try {
@@ -39,7 +39,26 @@ $tools = @(
             required   = @('state')
         }
     }
+    @{
+        name        = 'relay_pair'
+        description = 'Pairs a cloud Claude session with the HumanNeeded puck on this PC. Call it only when a "HumanNeeded relay" hook message asks for it; it returns a shell command that saves a 7-day relay key in the cloud session.'
+        inputSchema = @{ type = 'object'; properties = @{} }
+    }
 )
+
+# A 7-day key for one cloud session: HMAC(secret, "hn2:<expiry>"). The master secret never
+# leaves this PC; the listener re-derives the key from the expiry each message carries.
+function Get-PairToken {
+    $config = Get-RelayConfig
+    $parts = "$($config.token)".Split('.')
+    $key = [byte[]]($parts[2] -split '(..)' | Where-Object { $_ } | ForEach-Object { [Convert]::ToByte($_, 16) })
+    $expiry = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 7 * 86400
+    $hmac = New-Object Security.Cryptography.HMACSHA256 (, $key)
+    $sub = -join ($hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes("hn2:$expiry")) | ForEach-Object { $_.ToString('x2') })
+    Write-Log "relay_pair: issued a key for channel $($parts[1].Substring(0, 6))..., valid 7 days"
+    $token = "hn2.$($parts[1]).$expiry.$sub"
+    return "Run this one command in the cloud session's shell (it saves the HumanNeeded relay key; nothing else is needed), then carry on with the user's request:`nmkdir -p ~/.humanneeded && printf '%s' '$token' > ~/.humanneeded/relay"
+}
 
 # Runs hn.ps1 in its own process, its output captured so it can't reach the MCP stream.
 function Invoke-SetState($arguments) {
@@ -53,7 +72,7 @@ function Invoke-SetState($arguments) {
     return "HumanNeeded check: the puck connector on $env:COMPUTERNAME got set_state $state for session $session"
 }
 
-# --- Cloud relay listener (test, 0.1.17) ---
+# --- Cloud relay listener (test, 0.1.18) ---
 # Cloud Claude sessions can't reach this PC, so their hooks POST signed states to the
 # HumanNeeded relay on AWS, which forwards them over a WebSocket this connector holds open.
 # The channel and HMAC secret live in %USERPROFILE%\.humanneeded\relay.json as the token
@@ -89,8 +108,8 @@ $relayListener = {
     $hmac = New-Object Security.Cryptography.HMACSHA256 (, $key)
     $seen = @{}
 
-    # One listener per Windows user: other connector instances wait for the mutex.
-    $mutex = New-Object Threading.Mutex $false, 'Local\HumanNeededRelayListener'
+    # One listener per channel: other connector instances with the same token wait for the mutex.
+    $mutex = New-Object Threading.Mutex $false, "Local\HumanNeededRelay-$($channel.Substring(0, 12))"
     while ($true) {
         try { if ($mutex.WaitOne(30000)) { break } } catch [Threading.AbandonedMutexException] { break }
     }
@@ -131,15 +150,23 @@ $relayListener = {
                     $envelope = $message | ConvertFrom-Json
                     $body = "$($envelope.b)"
                     $sig = "$($envelope.sig)".ToLower()
-                    $expected = -join ($hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($body)) | ForEach-Object { $_.ToString('x2') })
+                    $m = $body | ConvertFrom-Json
+                    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                    $signer = $hmac
+                    if ($null -ne $m.x) {
+                        # hn2 key from relay_pair: HMAC(secret, "hn2:<expiry>"), valid until expiry.
+                        $expiry = [long]$m.x
+                        if ($expiry -lt $now -or $expiry -gt $now + 8 * 86400) { Log 'dropped a message with an expired pairing key'; continue }
+                        $subKey = $hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes("hn2:$expiry"))
+                        $signer = New-Object Security.Cryptography.HMACSHA256 (, $subKey)
+                    }
+                    $expected = -join ($signer.ComputeHash([Text.Encoding]::UTF8.GetBytes($body)) | ForEach-Object { $_.ToString('x2') })
                     $diff = $sig.Length -bxor $expected.Length
                     for ($i = 0; $i -lt [Math]::Min($sig.Length, $expected.Length); $i++) { $diff = $diff -bor ([int][char]$sig[$i] -bxor [int][char]$expected[$i]) }
                     if ($diff -ne 0) { Log 'dropped a message with a bad signature'; continue }
-                    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
                     foreach ($old in @($seen.Keys)) { if ($now - $seen[$old] -gt 600) { $seen.Remove($old) } }
                     if ($seen.ContainsKey($sig)) { Log 'dropped a replayed message'; continue }
                     $seen[$sig] = $now
-                    $m = $body | ConvertFrom-Json
                     if ([Math]::Abs($now - [long]$m.t) -gt 300) { Log "dropped a stale message ($($now - [long]$m.t) s old)"; continue }
                     $state = "$($m.s)".ToLower()
                     if (@('working', 'needs', 'done', 'idle', 'end') -notcontains $state) { continue }
@@ -175,6 +202,7 @@ function Start-RelayListener {
 Write-Log "started $version (pid $PID, $PSScriptRoot)"
 Start-RelayListener
 while ($null -ne ($line = [Console]::In.ReadLine())) {
+    $line = $line.TrimStart([char]0xFEFF)
     if (-not $line.Trim()) { continue }
     try { $request = $line | ConvertFrom-Json } catch { continue }
     $id = $request.id
@@ -187,8 +215,11 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
             }
             'tools/list' { $result = @{ tools = $tools } }
             'tools/call' {
-                if ($request.params.name -ne 'set_state') { throw "unknown tool $($request.params.name)" }
-                $text = Invoke-SetState $request.params.arguments
+                $text = switch ($request.params.name) {
+                    'set_state' { Invoke-SetState $request.params.arguments }
+                    'relay_pair' { Get-PairToken }
+                    default { throw "unknown tool $($request.params.name)" }
+                }
                 $result = @{ content = @(@{ type = 'text'; text = $text }); isError = ($text -like 'unknown state*') }
             }
             'ping' { $result = @{} }
