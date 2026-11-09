@@ -53,3 +53,19 @@ For everything at once, point the user to https://human-needed.com/settings/ (Ch
 Setup help and troubleshooting: https://human-needed.com/start/
 
 Don't send `working`/`needs`/`done`/`end` events by hand — the plugin's hooks do that.
+
+## Cloud sessions (relay, test)
+
+Cloud Claude sessions (claude.ai/code, cloud Cowork) reach the puck through the HumanNeeded relay:
+the cloud hook signs each state and the puck connector on the PC receives it over a WebSocket.
+The pairing token `hn1.<channel>.<secret>` is created by the connector in
+`%USERPROFILE%\.humanneeded\relay.json` (Mac/Linux: `~/.humanneeded/relay.json`).
+
+- "Set up / pair the cloud relay", "what is my relay token": on the PC, read the `token` from
+  that file and tell the user to paste it into the plugin's **relay** option (Desktop: plugin
+  settings for humanneeded; CLI: `/plugin` → humanneeded → configure). For claude.ai/code it can
+  also go in the cloud environment's variables as `HN_RELAY=<token>`. Treat it like a password:
+  anyone with it can light this puck.
+- "Reset the relay token": delete `relay.json` and restart the Claude app; a new token is made.
+- In a cloud session, the first prompt shows a `HumanNeeded 0.1.17 relay:` line saying whether the
+  state was delivered. On the PC, `hn.log` lines starting `relay:` show what arrived.

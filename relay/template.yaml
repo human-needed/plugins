@@ -1,0 +1,205 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  HumanNeeded cloud relay. A cloud Claude session's hook POSTs a signed puck state to
+  /s/{channel}; the relay forwards it unchanged to the PC holding a WebSocket on that channel.
+  The relay never sees the channel's HMAC secret (the PC checks signatures) and stores no
+  messages: the only table maps channel -> open WebSocket connection ids, expiring after 3 h.
+
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+
+Parameters:
+  StageName:
+    Type: String
+    Default: v1
+
+Resources:
+  Connections:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: ch, AttributeType: S }
+        - { AttributeName: id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: ch, KeyType: HASH }
+        - { AttributeName: id, KeyType: RANGE }
+      TimeToLiveSpecification: { AttributeName: ttl, Enabled: true }
+
+  RelayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: relay
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:PutItem, dynamodb:DeleteItem, dynamodb:Query]
+                Resource: !GetAtt Connections.Arn
+              - Effect: Allow
+                Action: execute-api:ManageConnections
+                Resource: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${WsApi}/${StageName}/POST/@connections/*
+
+  RelayFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt RelayRole.Arn
+      Timeout: 5
+      MemorySize: 128
+      Environment:
+        Variables:
+          TABLE: !Ref Connections
+          WS_ENDPOINT: !Sub https://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
+      Code:
+        ZipFile: |
+          // HumanNeeded relay (inline, kept short on purpose).
+          const { DynamoDBClient, PutItemCommand, DeleteItemCommand, QueryCommand } = require('@aws-sdk/client-dynamodb');
+          const { ApiGatewayManagementApiClient, PostToConnectionCommand } = require('@aws-sdk/client-apigatewaymanagementapi');
+          const db = new DynamoDBClient({});
+          const ws = new ApiGatewayManagementApiClient({ endpoint: process.env.WS_ENDPOINT });
+          const TABLE = process.env.TABLE;
+          const CH = /^[0-9a-f]{32}$/;
+          const SIG = /^[0-9a-f]{64}$/;
+          const MAX_CONN = 4;
+          const reply = (statusCode, obj) => ({ statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(obj) });
+
+          exports.handler = async (event) => {
+            const rc = event.requestContext || {};
+            if (rc.connectionId) {
+              // WebSocket API: the PC's listener.
+              if (rc.routeKey === '$connect') {
+                const ch = (event.queryStringParameters || {}).ch || '';
+                if (!CH.test(ch)) return { statusCode: 400 };
+                const ttl = Math.floor(Date.now() / 1000) + 3 * 3600;
+                await db.send(new PutItemCommand({ TableName: TABLE, Item: { ch: { S: ch }, id: { S: rc.connectionId }, ttl: { N: String(ttl) } } }));
+                return { statusCode: 200 };
+              }
+              return { statusCode: 200 }; // $disconnect / $default (keepalive pings): nothing to do
+            }
+
+            // HTTP API: POST /s/{channel} from a cloud session's hook.
+            const ch = (event.pathParameters || {}).channel || '';
+            const sig = ((event.headers || {})['x-hn-sig'] || '').toLowerCase();
+            let body = event.body || '';
+            if (event.isBase64Encoded) body = Buffer.from(body, 'base64').toString('utf8');
+            if (!CH.test(ch) || !SIG.test(sig) || body.length < 2 || body.length > 512) return reply(400, { error: 'bad request' });
+
+            const conns = await db.send(new QueryCommand({
+              TableName: TABLE, KeyConditionExpression: 'ch = :c',
+              ExpressionAttributeValues: { ':c': { S: ch } }, Limit: MAX_CONN,
+            }));
+            const data = Buffer.from(JSON.stringify({ b: body, sig }));
+            let delivered = 0;
+            await Promise.all((conns.Items || []).map(async (item) => {
+              try {
+                await ws.send(new PostToConnectionCommand({ ConnectionId: item.id.S, Data: data }));
+                delivered++;
+              } catch (e) {
+                if (e.name === 'GoneException' || e.$metadata?.httpStatusCode === 410) {
+                  await db.send(new DeleteItemCommand({ TableName: TABLE, Key: { ch: { S: ch }, id: item.id } })).catch(() => {});
+                }
+              }
+            }));
+            return reply(202, { delivered });
+          };
+
+  # --- WebSocket API (PC side) ---
+  WsApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: humanneeded-relay-ws
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: $request.body.action
+
+  WsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WsApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RelayFunction.Arn}/invocations
+
+  WsConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties: { ApiId: !Ref WsApi, RouteKey: $connect, Target: !Sub 'integrations/${WsIntegration}' }
+  WsDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties: { ApiId: !Ref WsApi, RouteKey: $disconnect, Target: !Sub 'integrations/${WsIntegration}' }
+  WsDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties: { ApiId: !Ref WsApi, RouteKey: $default, Target: !Sub 'integrations/${WsIntegration}' }
+
+  WsDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn: [WsConnectRoute, WsDisconnectRoute, WsDefaultRoute]
+    Properties: { ApiId: !Ref WsApi }
+
+  WsStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WsApi
+      StageName: !Ref StageName
+      DeploymentId: !Ref WsDeployment
+      DefaultRouteSettings: { ThrottlingBurstLimit: 20, ThrottlingRateLimit: 10 }
+
+  # --- HTTP API (cloud session side) ---
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: humanneeded-relay-http
+      ProtocolType: HTTP
+
+  HttpIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      PayloadFormatVersion: '2.0'
+      IntegrationUri: !GetAtt RelayFunction.Arn
+
+  HttpPostRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties: { ApiId: !Ref HttpApi, RouteKey: 'POST /s/{channel}', Target: !Sub 'integrations/${HttpIntegration}' }
+
+  HttpStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings: { ThrottlingBurstLimit: 20, ThrottlingRateLimit: 10 }
+
+  WsInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RelayFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${WsApi}/*
+
+  HttpInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RelayFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*
+
+Outputs:
+  WebSocketUrl:
+    Description: The PC connects here with ?ch=<channel>
+    Value: !Sub wss://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
+  PostUrl:
+    Description: Cloud hooks POST signed states to <PostUrl>/s/<channel>
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com

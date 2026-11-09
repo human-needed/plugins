@@ -1,8 +1,17 @@
 {
   "name": "humanneeded",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Lights up and chimes the HumanNeeded puck when Claude is working, done, or needs you.",
   "author": {
     "name": "HumanNeeded"
+  },
+  "userConfig": {
+    "relay": {
+      "type": "string",
+      "title": "Cloud relay token (test)",
+      "description": "Lets cloud Claude sessions (claude.ai/code, cloud Cowork) light your puck through the HumanNeeded relay. Ask Claude on this PC for your relay token and paste it here. Leave empty to keep cloud sessions off the relay.",
+      "required": false,
+      "sensitive": false
+    }
   }
 }

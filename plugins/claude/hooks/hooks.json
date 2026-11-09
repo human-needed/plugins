@@ -31,14 +31,6 @@
             ],
             "cloud": "device",
             "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "sh",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/egress.sh"
-            ],
-            "timeout": 10
           }
         ]
       }
