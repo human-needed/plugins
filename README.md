@@ -30,7 +30,7 @@ that finds the puck's `/dev/cu.usbmodem…` port by its `HN…` serial number. T
 sessions, cloud Cowork/Code sessions can drive the puck too. Try it by hand:
 `bash scripts/hn.sh hello`. Each run adds a line to `~/.humanneeded/hn.log`.
 
-**Cloud sessions through the relay (0.1.21, test):** cloud Claude sessions (claude.ai/code,
+**Cloud sessions through the relay (0.1.22, test):** cloud Claude sessions (claude.ai/code,
 cloud Cowork) run their hooks in a Linux VM that can't reach your PC, but can reach AWS. There
 `scripts/hn.sh` hands each state to `scripts/relay.sh`, which POSTs it to the HumanNeeded relay
 (`relay/`: a Lambda function URL + an API Gateway WebSocket) under a hash of the session id. The puck connector the Claude

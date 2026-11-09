@@ -1,5 +1,5 @@
 #!/bin/sh
-# HumanNeeded cloud relay sender (test, 0.1.21). Runs inside a cloud Claude VM (Linux with
+# HumanNeeded cloud relay sender (test, 0.1.22). Runs inside a cloud Claude VM (Linux with
 # CLAUDE_CODE_REMOTE=true); hn.sh calls it there and nowhere else, so local sessions never use
 # the relay and states aren't sent twice.
 #
@@ -16,7 +16,7 @@
 #    HMAC-signed; the PC checks the signature.
 # Prints one line on UserPromptSubmit; silent otherwise. Always exits 0.
 
-VERSION=0.1.21
+VERSION=0.1.22
 # The relay Lambda's function URL: Cowork sessions connected to a PC can't reach execute-api hosts.
 RELAY_URL="${HN_RELAY_URL:-https://tcxdfuid4msoglniqenx2qhnza0gwwyq.lambda-url.us-east-2.on.aws}"
 

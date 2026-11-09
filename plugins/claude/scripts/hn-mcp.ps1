@@ -11,7 +11,7 @@ $utf8 = New-Object Text.UTF8Encoding $false
 [Console]::OutputEncoding = $utf8
 $hn = Join-Path $PSScriptRoot 'hn.ps1'
 $logFile = Join-Path $env:USERPROFILE '.humanneeded\hn.log'
-$version = '0.1.21'
+$version = '0.1.22'
 
 function Write-Log([string]$text) {
     try {
@@ -33,7 +33,7 @@ $tools = @(
             type       = 'object'
             properties = @{
                 state      = @{ type = 'string'; enum = @('working', 'needs', 'done', 'idle', 'end') }
-                session_id = @{ type = 'string' }
+                session_id = @{ type = 'string'; description = 'For a cloud session: the exact session_id given in the HumanNeeded hook message. Required to link the session; without it only the light changes.' }
                 agent      = @{ type = 'string' }
             }
             required   = @('state')
@@ -72,7 +72,12 @@ function Add-RelayClaim([string]$h) {
 function Invoke-SetState($arguments) {
     $state = "$($arguments.state)".ToLower()
     if (@('working', 'needs', 'done', 'idle', 'end') -notcontains $state) { return "unknown state '$state'" }
-    $session = if ($arguments.session_id) { "$($arguments.session_id)" } else { 'default' }
+    $raw = try { $arguments | ConvertTo-Json -Compress } catch { "$arguments" }
+    Write-Log "set_state args: $("$raw".Substring(0, [Math]::Min(300, "$raw".Length)))"
+    $id = $arguments.session_id
+    if (-not $id) { $id = $arguments.sessionId }
+    if (-not $id) { $id = $arguments.session }
+    $session = if ($id) { "$id".Trim() } else { 'default' }
     $agent = if ($arguments.agent) { "$($arguments.agent)" -replace '\s', '' } else { 'claude' }
     if ($session -ne 'default') {
         # Claim this session at the relay so its cloud hook's states reach this PC, and show it
@@ -84,10 +89,13 @@ function Invoke-SetState($arguments) {
     Write-Log "set_state $state $session $agent"
     $null = (@{ session_id = $session } | ConvertTo-Json -Compress) |
         & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $hn $state $agent 2>&1
-    return "HumanNeeded check: the puck connector on $env:COMPUTERNAME got set_state $state for session $session"
+    if ($session -eq 'default') {
+        return "HumanNeeded check: the puck connector on $env:COMPUTERNAME set the light to $state, but no session_id arrived, so no cloud session was linked. To link one, call set_state again with session_id set to the id from the HumanNeeded hook message."
+    }
+    return "HumanNeeded check: the puck connector on $env:COMPUTERNAME got set_state $state and linked session $session"
 }
 
-# --- Cloud relay listener (test, 0.1.21) ---
+# --- Cloud relay listener (test, 0.1.22) ---
 # Cloud Claude sessions can't reach this PC, so their hooks POST signed states to the
 # HumanNeeded relay on AWS, which forwards them over a WebSocket this connector holds open.
 # The channel and HMAC secret live in %USERPROFILE%\.humanneeded\relay.json as the token
