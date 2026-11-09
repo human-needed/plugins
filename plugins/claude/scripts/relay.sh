@@ -1,5 +1,5 @@
 #!/bin/sh
-# HumanNeeded cloud relay sender (test, 0.1.23). Runs inside a cloud Claude VM (Linux with
+# HumanNeeded cloud relay sender (test, 0.1.24). Runs inside a cloud Claude VM (Linux with
 # CLAUDE_CODE_REMOTE=true); hn.sh calls it there and nowhere else, so local sessions never use
 # the relay and states aren't sent twice.
 #
@@ -17,7 +17,7 @@
 #    HMAC-signed; the PC checks the signature.
 # Prints one line on UserPromptSubmit; silent otherwise. Always exits 0.
 
-VERSION=0.1.23
+VERSION=0.1.24
 # The relay Lambda's function URL: Cowork sessions connected to a PC can't reach execute-api hosts.
 RELAY_URL="${HN_RELAY_URL:-https://tcxdfuid4msoglniqenx2qhnza0gwwyq.lambda-url.us-east-2.on.aws}"
 
@@ -44,25 +44,6 @@ post() { # $1 = path, $2 = body, $3 = signature or empty -> prints response + ht
     curl -sS --max-time 4 -X POST -H 'content-type: application/json' \
       --data-binary "$2" -w ' http=%{http_code}' "$RELAY_URL$1" 2>&1
   fi
-}
-
-# When the relay is blocked from this hook: which hosts can it reach? Runs once per session
-# (marker in /tmp), all in parallel, 2 s each. Prints "host code" pairs; "blocked" = proxy refusal.
-probe_hosts() {
-  d="/tmp/hn-probe.$$"; mkdir -p "$d" 2>/dev/null || return 0
-  i=10
-  for h in api.github.com raw.githubusercontent.com registry.npmjs.org pypi.org ntfy.sh \
-           s3.us-east-2.amazonaws.com dynamodb.us-east-2.amazonaws.com \
-           x.lambda-url.us-east-2.on.aws iot.us-east-2.amazonaws.com \
-           firestore.googleapis.com storage.googleapis.com api.anthropic.com; do
-    i=$((i+1))
-    ( c="$(curl -s --max-time 2 -o "$d/b$i" -w '%{http_code}' "https://$h/" 2>"$d/e$i")"
-      grep -qiE 'blocked|no rule' "$d/b$i" "$d/e$i" 2>/dev/null && c=blocked
-      echo "$h ${c:-000}" > "$d/r$i" ) &
-  done
-  wait
-  cat "$d"/r* 2>/dev/null | tr '\n' ';' | sed 's/;$//'
-  rm -rf "$d"
 }
 
 agent="$(printf '%s' "$agent" | tr -cd 'A-Za-z0-9_-' | cut -c1-16)"
@@ -108,7 +89,7 @@ if [ -z "$token" ]; then
       fi ;;
     unreachable)
       echo "HumanNeeded $VERSION relay: $state not sent (relay unreachable: $(printf '%s' "$resp" | tr '
-' ' ' | cut -c1-300)). Hook network probe: $(probe_hosts). No action needed." ;;
+' ' ' | cut -c1-300)). No action needed." ;;
   esac
   exit 0
 fi

@@ -97,10 +97,9 @@ Resources:
               return { statusCode: 200 };
             }
 
-            // POST /s/{channel} (signed) or /h/{hash} (claimed session) from a cloud hook, via the
-            // HTTP API or the function URL (reachable where execute-api is blocked).
-            let pp = event.pathParameters;
-            if (!pp) {
+            // POST /s/{channel} (signed) or /h/{key} (claimed key) from a cloud hook, via the function URL.
+            let pp;
+            {
               const m = /^\/(h|s)\/([0-9a-f]{32})$/.exec(event.rawPath || '');
               if (!m || (rc.http || {}).method !== 'POST') return reply(404, { error: 'not found' });
               pp = m[1] === 's' ? { channel: m[2] } : { hash: m[2] };
@@ -173,36 +172,6 @@ Resources:
       DeploymentId: !Ref WsDeployment
       DefaultRouteSettings: { ThrottlingBurstLimit: 20, ThrottlingRateLimit: 10 }
 
-  # --- HTTP API (cloud session side) ---
-  HttpApi:
-    Type: AWS::ApiGatewayV2::Api
-    Properties:
-      Name: humanneeded-relay-http
-      ProtocolType: HTTP
-
-  HttpIntegration:
-    Type: AWS::ApiGatewayV2::Integration
-    Properties:
-      ApiId: !Ref HttpApi
-      IntegrationType: AWS_PROXY
-      PayloadFormatVersion: '2.0'
-      IntegrationUri: !GetAtt RelayFunction.Arn
-
-  HttpPostRoute:
-    Type: AWS::ApiGatewayV2::Route
-    Properties: { ApiId: !Ref HttpApi, RouteKey: 'POST /s/{channel}', Target: !Sub 'integrations/${HttpIntegration}' }
-  HttpSessionRoute:
-    Type: AWS::ApiGatewayV2::Route
-    Properties: { ApiId: !Ref HttpApi, RouteKey: 'POST /h/{hash}', Target: !Sub 'integrations/${HttpIntegration}' }
-
-  HttpStage:
-    Type: AWS::ApiGatewayV2::Stage
-    Properties:
-      ApiId: !Ref HttpApi
-      StageName: $default
-      AutoDeploy: true
-      DefaultRouteSettings: { ThrottlingBurstLimit: 20, ThrottlingRateLimit: 10 }
-
   WsInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -211,15 +180,7 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${WsApi}/*
 
-  HttpInvokePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !Ref RelayFunction
-      Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*
-
-  # --- Function URL (cloud session side; Cowork's connected sessions block execute-api) ---
+  # --- Function URL (cloud session side; Cowork sessions connected to a PC block execute-api hosts) ---
   RelayUrl:
     Type: AWS::Lambda::Url
     Properties:
@@ -249,6 +210,3 @@ Outputs:
   WebSocketUrl:
     Description: The PC connects here with ?ch=<channel>
     Value: !Sub wss://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
-  PostUrl:
-    Description: Cloud hooks POST signed states to <PostUrl>/s/<channel>
-    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com

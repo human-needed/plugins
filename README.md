@@ -18,19 +18,15 @@ answer, green when it finishes. Ask Claude "test my puck" or "make needs purple"
 
 Remove it with `claude plugin uninstall humanneeded@humanneeded`.
 
-**Cloud sessions (Cowork, claude.ai/code): being tested.** Their hooks run in Anthropic's cloud,
-not on your PC. The plugin's hooks module (`hooks/register.ts`) sends each state to the plugin's
-local connector (`scripts/hn-mcp.ps1`), which the Claude desktop app runs on the PC the session is
-linked to. The first state of each cloud session adds a "HumanNeeded check" note to the
-conversation saying whether it got through (the model doesn't read it).
-
-**macOS (being tested, 0.1.15):** the hooks also call `scripts/hn.sh`, a bash version of `hn.ps1`
-that finds the puck's `/dev/cu.usbmodem…` port by its `HN…` serial number. Those hooks are marked
-`"cloud": "device"`, so when the Claude app on a Mac offers to run this machine's hooks for cloud
-sessions, cloud Cowork/Code sessions can drive the puck too. Try it by hand:
+**macOS (being tested, 0.1.24):** the hooks call `scripts/hn.sh`, a bash version of `hn.ps1`
+that finds the puck's `/dev/cu.usbmodem…` port by its `HN…` serial number. The plugin's Mac
+connector (`puck-mac`: `scripts/hn-mcp.sh` starting `scripts/hn-mcp.py`) gives Claude the
+`set_state` tool and receives cloud sessions' states from the relay, like `hn-mcp.ps1` on Windows.
+It needs `python3` (Homebrew's, or Apple's after `xcode-select --install`). Each OS shows the other
+OS's connector as failed to start; that's expected for now. Try the script by hand:
 `bash scripts/hn.sh hello`. Each run adds a line to `~/.humanneeded/hn.log`.
 
-**Cloud sessions through the relay (0.1.23, test):** cloud Claude sessions (claude.ai/code,
+**Cloud sessions through the relay (0.1.24, test):** cloud Claude sessions (claude.ai/code,
 cloud Cowork) run their hooks in a Linux VM that can't reach your PC. There `scripts/hn.sh` hands
 each state to `scripts/relay.sh`, which POSTs it to the HumanNeeded relay (`relay/`: a Lambda
 function URL plus an API Gateway WebSocket) under a key derived from your Claude account:
@@ -51,11 +47,13 @@ Codex and Cursor plugins are coming.
 .claude-plugin/marketplace.json   Claude Code marketplace (this repo)
 plugins/claude/                   Claude Code plugin: hooks + "humanneeded" skill
 host/hn.ps1                       Windows script the hooks call; talks to the puck over USB serial
-host/hn-mcp.ps1                   local connector (MCP over stdio): set_state -> hn.ps1
-plugins/claude/hooks/register.ts  hooks module: cloud sessions -> the local connector
+host/hn-mcp.ps1                   Windows connector (MCP over stdio): set_state + relay listener -> hn.ps1
+host/hn.sh, host/hn-mcp.sh/.py    the same for macOS
+host/relay.sh                     cloud VM side: posts states to the relay
+relay/                            the relay (CloudFormation: Lambda function URL + WebSocket API)
 ```
 
-`plugins/*/scripts/` holds copies of `host/hn.ps1` and `host/hn-mcp.ps1`, because installed plugins can't reach outside
+`plugins/*/scripts/` holds copies of the `host/` scripts, because installed plugins can't reach outside
 their folder. After editing anything in `host/`, run `host/sync-plugins.ps1`.
 
 Try the script by hand:
