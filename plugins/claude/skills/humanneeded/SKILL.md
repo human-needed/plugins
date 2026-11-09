@@ -5,15 +5,13 @@ description: Control the HumanNeeded desk puck (the USB light/chime that shows w
 
 # HumanNeeded puck
 
-The puck is driven by a script in `${CLAUDE_PLUGIN_ROOT}/scripts/`. On Windows:
+The puck is driven by `${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1`. Run it with:
 
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1" <command> [args]
 ```
 
-On macOS: `bash "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh" <command> [args]`.
-
-In a cloud session (Cowork, claude.ai/code) neither script can reach the puck. There, to show
+In a cloud session (Cowork, claude.ai/code) the script can't reach the puck. There, to show
 the user a state, call the puck connector's `set_state` tool if it is available; settings can't
 be changed from a cloud session, so point the user to https://human-needed.com/settings/.
 

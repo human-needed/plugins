@@ -90,9 +90,10 @@ write_log() {
 }
 
 if [ "$is_event" = 1 ]; then
+  # In the background with no output, so a hook that waits (the prompt hook) never holds the
+  # user's prompt while the puck is looked for.
   line="EV $cmd $session_id ${1:-claude}"
-  reply="$(send_to_puck "$line")"
-  write_log "$line" "$reply"
+  ( reply="$(send_to_puck "$line")"; write_log "$line" "$reply" ) </dev/null >/dev/null 2>&1 &
   exit 0
 fi
 

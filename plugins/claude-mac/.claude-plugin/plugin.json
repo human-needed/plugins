@@ -1,0 +1,8 @@
+{
+  "name": "humanneeded-mac",
+  "version": "0.1.28",
+  "description": "macOS: lights up and chimes the HumanNeeded puck when Claude is working, done, or needs you.",
+  "author": {
+    "name": "HumanNeeded"
+  }
+}
