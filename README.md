@@ -30,13 +30,13 @@ that finds the puck's `/dev/cu.usbmodem…` port by its `HN…` serial number. T
 sessions, cloud Cowork/Code sessions can drive the puck too. Try it by hand:
 `bash scripts/hn.sh hello`. Each run adds a line to `~/.humanneeded/hn.log`.
 
-**Cloud sessions through the relay (0.1.20, test):** cloud Claude sessions (claude.ai/code,
+**Cloud sessions through the relay (0.1.21, test):** cloud Claude sessions (claude.ai/code,
 cloud Cowork) run their hooks in a Linux VM that can't reach your PC, but can reach AWS. There
 `scripts/hn.sh` hands each state to `scripts/relay.sh`, which POSTs it to the HumanNeeded relay
-(`relay/`: API Gateway + Lambda) under a hash of the session id. The puck connector the Claude
+(`relay/`: a Lambda function URL + an API Gateway WebSocket) under a hash of the session id. The puck connector the Claude
 app runs on your PC (`scripts/hn-mcp.ps1`) keeps a WebSocket open to the relay. The first time a
 cloud session's state isn't delivered, the hook asks Claude to call the connector's `set_state`
-tool with the session id (that call reaches the PC through the app's link to it); the PC then
+tool with the session id (or say "link my desk light") (that call reaches the PC through the app's link to it); the PC then
 claims that session at the relay for 24 h, and its later states arrive. Messages carry only the
 state, the session hash, the agent name and a timestamp, and the relay stores no messages.
 Nothing is saved in the cloud session. Local sessions never use the relay. For signed states in

@@ -97,9 +97,14 @@ Resources:
               return { statusCode: 200 };
             }
 
-            // HTTP API: POST /s/{channel} (signed with the channel secret) or POST /h/{hash} (a claimed
-            // cloud session, unsigned) from a cloud session's hook.
-            const pp = event.pathParameters || {};
+            // POST /s/{channel} (signed) or /h/{hash} (claimed session) from a cloud hook, via the
+            // HTTP API or the function URL (reachable where execute-api is blocked).
+            let pp = event.pathParameters;
+            if (!pp) {
+              const m = /^\/(h|s)\/([0-9a-f]{32})$/.exec(event.rawPath || '');
+              if (!m || (rc.http || {}).method !== 'POST') return reply(404, { error: 'not found' });
+              pp = m[1] === 's' ? { channel: m[2] } : { hash: m[2] };
+            }
             const sig = ((event.headers || {})['x-hn-sig'] || '').toLowerCase();
             let body = event.body || '';
             if (event.isBase64Encoded) body = Buffer.from(body, 'base64').toString('utf8');
@@ -214,7 +219,33 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*
 
+  # --- Function URL (cloud session side; Cowork's connected sessions block execute-api) ---
+  RelayUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt RelayFunction.Arn
+      AuthType: NONE
+
+  UrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !Ref RelayFunction
+      FunctionUrlAuthType: NONE
+      Principal: '*'
+
+  UrlInvokeFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RelayFunction
+      InvokedViaFunctionUrl: true
+      Principal: '*'
+
 Outputs:
+  FunctionUrl:
+    Description: Cloud hooks POST to <FunctionUrl>h/<hash> or <FunctionUrl>s/<channel>
+    Value: !GetAtt RelayUrl.FunctionUrl
   WebSocketUrl:
     Description: The PC connects here with ?ch=<channel>
     Value: !Sub wss://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
