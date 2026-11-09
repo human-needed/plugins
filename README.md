@@ -41,7 +41,7 @@ your account reaches your puck with no setup. Messages carry only the state, the
 short hash of the session id, the agent name and a timestamp; the relay stores no messages, and
 nothing is saved in the cloud session. Local sessions never use the relay. Without an accountUuid
 in the VM, a session can still be linked by asking Claude to "link my desk light". For signed
-states, set `HN_RELAY` to the token in `%USERPROFILE%\.humanneededelay.json`.
+states, set `HN_RELAY` to the token in `%USERPROFILE%\.humanneeded\relay.json`.
 
 Codex and Cursor plugins are coming.
 
