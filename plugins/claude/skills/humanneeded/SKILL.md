@@ -5,11 +5,17 @@ description: Control the HumanNeeded desk puck (the USB light/chime that shows w
 
 # HumanNeeded puck
 
-The puck is driven by `${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1` (Windows) — run it with:
+The puck is driven by a script in `${CLAUDE_PLUGIN_ROOT}/scripts/`. On Windows:
 
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1" <command> [args]
 ```
+
+On macOS: `bash "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh" <command> [args]`.
+
+In a cloud session (Cowork, claude.ai/code) neither script can reach the puck. There, to show
+the user a state, call the puck connector's `set_state` tool if it is available; settings can't
+be changed from a cloud session, so point the user to https://human-needed.com/settings/.
 
 Each command prints the puck's reply: `OK`, `ERR <msg>`, a JSON line, or
 `HumanNeeded puck not found` (unplugged, or another program such as a serial monitor
@@ -54,13 +60,13 @@ Setup help and troubleshooting: https://human-needed.com/start/
 
 Don't send `working`/`needs`/`done`/`end` events by hand — the plugin's hooks do that.
 
-## Cloud sessions (relay, test)
+## Cloud sessions
 
-Cloud Claude sessions (claude.ai/code, cloud Cowork) reach the puck through the HumanNeeded relay,
-routed by the user's Claude account, so normally nothing needs doing.
+Cloud Claude sessions (Cowork, claude.ai/code) reach the puck through the HumanNeeded relay,
+routed by the user's Claude account, so nothing needs setting up.
 
-- A `HumanNeeded … relay` hook note says once per session whether states are getting through.
-- If a note says the session isn't linked and the user asks to "link my desk light", call
-  `set_state` with state `working` and the session_id from that note.
-- On the PC, `hn.log` lines starting `relay:` show the account key, claims and the states that
-  arrived. "no Claude account found" means the PC's `.claude.json` has no `accountUuid`.
+- A `HumanNeeded desk light:` hook note appears once per session only when states aren't getting
+  through (no computer listening, relay unreachable, or no account id in the session). Mention it
+  only if the user asks about the puck.
+- On the user's computer, `hn.log` lines starting `relay:` show the connection and each state
+  that arrived. "no Claude account in .claude.json" means that computer isn't signed in to Claude.

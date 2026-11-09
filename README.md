@@ -18,26 +18,22 @@ answer, green when it finishes. Ask Claude "test my puck" or "make needs purple"
 
 Remove it with `claude plugin uninstall humanneeded@humanneeded`.
 
-**macOS (being tested, 0.1.24):** the hooks call `scripts/hn.sh`, a bash version of `hn.ps1`
-that finds the puck's `/dev/cu.usbmodem…` port by its `HN…` serial number. The plugin's Mac
-connector (`puck-mac`: `scripts/hn-mcp.sh` starting `scripts/hn-mcp.py`) gives Claude the
-`set_state` tool and receives cloud sessions' states from the relay, like `hn-mcp.ps1` on Windows.
-It needs `python3` (Homebrew's, or Apple's after `xcode-select --install`). Each OS shows the other
+**macOS (in testing):** the hooks call `scripts/hn.sh`, a bash version of `hn.ps1` that finds
+the puck's `/dev/cu.usbmodem…` port by its `HN…` serial number. The Mac connector (`puck-mac`:
+`scripts/hn-mcp.sh` starting `scripts/hn-mcp.py`) does what `hn-mcp.ps1` does on Windows. It
+needs `python3` (Homebrew's, or Apple's after `xcode-select --install`). Each OS shows the other
 OS's connector as failed to start; that's expected for now. Try the script by hand:
 `bash scripts/hn.sh hello`. Each run adds a line to `~/.humanneeded/hn.log`.
 
-**Cloud sessions through the relay (0.1.24, test):** cloud Claude sessions (claude.ai/code,
-cloud Cowork) run their hooks in a Linux VM that can't reach your PC. There `scripts/hn.sh` hands
-each state to `scripts/relay.sh`, which POSTs it to the HumanNeeded relay (`relay/`: a Lambda
-function URL plus an API Gateway WebSocket) under a key derived from your Claude account:
-sha256("humanneeded-account:" + accountUuid)[:32], read from `~/.claude.json`. The puck connector
-the Claude app runs on your PC (`scripts/hn-mcp.ps1`) reads the same accountUuid from its own
-`.claude.json`, keeps a WebSocket open to the relay and claims that key, so every cloud session of
-your account reaches your puck with no setup. Messages carry only the state, the account key, a
-short hash of the session id, the agent name and a timestamp; the relay stores no messages, and
-nothing is saved in the cloud session. Local sessions never use the relay. Without an accountUuid
-in the VM, a session can still be linked by asking Claude to "link my desk light". For signed
-states, set `HN_RELAY` to the token in `%USERPROFILE%\.humanneeded\relay.json`.
+**Cloud sessions (Cowork, claude.ai/code):** their hooks run in a Linux VM that can't reach your
+computer. There `scripts/hn.sh` hands each state to `scripts/relay.sh`, which POSTs it to the
+HumanNeeded relay (`relay/`) under a key derived from your Claude account:
+sha256("humanneeded-account:" + accountUuid)[:32], read from `~/.claude.json`. The plugin's
+connector on your computer (`hn-mcp.ps1` / `hn-mcp.py`, started by the Claude app) reads the same
+accountUuid from its own `.claude.json`, holds a WebSocket to the relay under that key, and passes
+the states that arrive to the puck. No setup. Messages carry only the state, the account key, a
+short hash of the session id, the agent name and a timestamp; the relay stores no messages and
+nothing is saved in the cloud session. Local sessions never use the relay.
 
 Codex and Cursor plugins are coming.
 
@@ -45,7 +41,7 @@ Codex and Cursor plugins are coming.
 
 ```
 .claude-plugin/marketplace.json   Claude Code marketplace (this repo)
-plugins/claude/                   Claude Code plugin: hooks + "humanneeded" skill
+plugins/claude/                   Claude Code plugin: hooks, connectors (.mcp.json), "humanneeded" skill
 host/hn.ps1                       Windows script the hooks call; talks to the puck over USB serial
 host/hn-mcp.ps1                   Windows connector (MCP over stdio): set_state + relay listener -> hn.ps1
 host/hn.sh, host/hn-mcp.sh/.py    the same for macOS

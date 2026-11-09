@@ -5,11 +5,9 @@
 #   hn.sh set <key> <value> | get <key|all> | mute <minutes> | test <state> | hello | status | clear
 #
 # Same protocol as hn.ps1: one line to the puck over USB serial, one line back.
-# Always exits 0 within ~2 s and is silent for agent events, except one check line on
-# UserPromptSubmit that says where the hook ran (on this Mac, or in a cloud VM).
-# Every run adds a line to ~/.humanneeded/hn.log.
+# Always exits 0 within ~2 s and is silent for agent events. In a cloud Claude VM it hands
+# events to relay.sh instead. Every run on a Mac adds a line to ~/.humanneeded/hn.log.
 
-VERSION=0.1.24
 os="$(uname -s)"
 dir="$HOME/.humanneeded"
 log="$dir/hn.log"
@@ -29,19 +27,11 @@ session_id="$(json_field session_id | tr -d '[:space:]')"
 event_name="$(json_field hook_event_name)"
 [ -n "$session_id" ] || session_id=default
 
-where="$(hostname -s 2>/dev/null || hostname) ($os), entrypoint ${CLAUDE_CODE_ENTRYPOINT:-none}, remote ${CLAUDE_CODE_REMOTE:-none}"
-
-# Not a Mac: a cloud VM (Linux) or Windows. Nothing to drive here; say so on the
-# prompt hook so a cloud test shows where the hook ran, then stop.
+# Not a Mac. In a cloud Claude VM, send events through the HumanNeeded relay to the user's
+# computer; anywhere else (Windows runs hn.ps1) there is nothing to do.
 if [ "$os" != "Darwin" ]; then
-  # Cloud Claude VM: send the state through the HumanNeeded relay to the PC (test, 0.1.24).
   if [ "$is_event" = 1 ] && [ "$os" = "Linux" ] && [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
     sh "$(dirname "$0")/relay.sh" "$cmd" "${1:-claude}" "$session_id" "$event_name"
-    exit 0
-  fi
-  if [ "$is_event" = 1 ]; then
-    { date -u +%FT%TZ; echo "$cmd $session_id event=$event_name on $where"; } >> /tmp/hn-hook-check.log 2>/dev/null
-    [ "$event_name" = "UserPromptSubmit" ] && echo "HumanNeeded $VERSION hook check: ran on $where, not a Mac, puck skipped"
   fi
   exit 0
 fi
@@ -92,8 +82,8 @@ send_to_puck() {
 
 write_log() {
   mkdir -p "$dir" 2>/dev/null
-  printf '%s  %s  -> %s  (%s ms, %s, %s)\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" "${2:-no puck}" "$(elapsed)" \
-    "$where" "$(cd "$(dirname "$0")" 2>/dev/null && pwd)" >> "$log" 2>/dev/null
+  printf '%s  %s  -> %s  (%s ms, %s)\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" "${2:-no puck}" "$(elapsed)" \
+    "$(cd "$(dirname "$0")" 2>/dev/null && pwd)" >> "$log" 2>/dev/null
   if [ -f "$log" ] && [ "$(wc -c < "$log")" -gt 65536 ]; then
     tail -n 200 "$log" > "$log.tmp" && mv "$log.tmp" "$log"
   fi
@@ -103,9 +93,6 @@ if [ "$is_event" = 1 ]; then
   line="EV $cmd $session_id ${1:-claude}"
   reply="$(send_to_puck "$line")"
   write_log "$line" "$reply"
-  if [ "$event_name" = "UserPromptSubmit" ]; then
-    echo "HumanNeeded $VERSION hook check: ran on $where, puck: ${reply:-not found}"
-  fi
   exit 0
 fi
 

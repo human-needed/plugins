@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-# HumanNeeded puck connector for macOS (MCP over stdio), the counterpart of hn-mcp.ps1.
+# HumanNeeded connector for macOS (MCP over stdio), the counterpart of hn-mcp.ps1.
 # Standard library only. hn-mcp.sh starts it when python3 is usable.
 #
-#  - Tool set_state: shows a state on the puck through hn.sh (and links a cloud session id).
-#  - Cloud relay listener (test): holds a WebSocket to the HumanNeeded relay, claims this Mac's
-#    Claude account key (sha256("humanneeded-account:" + accountUuid)[:32], accountUuid from
-#    ~/.claude.json, the same as the cloud VM's) and any linked session hashes, and passes the
-#    states that arrive to hn.sh. Unsigned states are accepted only for claimed keys, signed ones
-#    only with this Mac's channel secret; every state must be under 5 min old and not a replay.
-import base64, hashlib, hmac, json, os, re, secrets, socket, ssl, struct, subprocess, sys, threading, time
+#  - Tool set_state: shows a state on the puck through hn.sh (for testing it from a session that
+#    can't run hn.sh itself, such as a Cowork session).
+#  - Cloud relay listener: connects to the HumanNeeded relay with this Claude account's key,
+#    sha256("humanneeded-account:" + accountUuid)[:32] (accountUuid from ~/.claude.json, the same
+#    as in the account's cloud VMs), and passes the states that arrive to hn.sh. States must be
+#    for this key and under 5 min old.
+import base64, hashlib, json, os, re, secrets, socket, ssl, struct, subprocess, sys, threading, time
 from urllib.parse import urlsplit
+try:
+    import fcntl
+except ImportError:   # Windows, when testing there
+    fcntl = None
 
-VERSION = '0.1.24'
 RELAY_WS = 'wss://r9k4y2qgz5.execute-api.us-east-2.amazonaws.com/v1'
 HERE = os.path.dirname(os.path.abspath(__file__))
 HN = os.environ.get('HN_SCRIPT') or os.path.join(HERE, 'hn.sh')
@@ -19,11 +22,14 @@ BASH = os.environ.get('HN_BASH') or '/bin/bash'   # overridable for tests
 HOME = os.path.expanduser('~')
 DIR = os.path.join(HOME, '.humanneeded')
 LOG = os.path.join(DIR, 'hn.log')
-CLAIMS = os.path.join(DIR, 'claims.json')
-RELAY_JSON = os.path.join(DIR, 'relay.json')
 STATES = ('working', 'needs', 'done', 'idle', 'end')
-HEX32 = re.compile(r'^[0-9a-f]{32}$')
 _out = threading.Lock()
+
+try:
+    with open(os.path.join(HERE, '..', '.claude-plugin', 'plugin.json'), encoding='utf-8') as _f:
+        VERSION = json.load(_f)['version']
+except Exception:
+    VERSION = 'dev'
 
 
 def log(text):
@@ -35,41 +41,12 @@ def log(text):
         pass
 
 
-def short_hash(text):
-    return hashlib.sha256(text.encode('utf-8')).hexdigest()[:32]
-
-
 def run_hn(state, agent, session):
     try:
         subprocess.run([BASH, HN, state, agent], input=json.dumps({'session_id': session}).encode(),
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
     except Exception as e:
         log('mcp: hn.sh failed: %s' % e)
-
-
-def read_claims():
-    now = time.time()
-    try:
-        with open(CLAIMS, encoding='utf-8') as f:
-            return {k: v for k, v in json.load(f).items() if HEX32.match(k) and float(v) > now}
-    except Exception:
-        return {}
-
-
-def add_claim(h):
-    for _ in range(5):
-        try:
-            claims = read_claims()
-            claims[h] = int(time.time()) + 86400
-            os.makedirs(DIR, exist_ok=True)
-            tmp = CLAIMS + '.%d' % os.getpid()
-            with open(tmp, 'w', encoding='utf-8') as f:
-                json.dump(claims, f)
-            os.replace(tmp, CLAIMS)
-            log('mcp: relay: claimed cloud session %s...' % h[:6])
-            return
-        except OSError:
-            time.sleep(0.1)
 
 
 def account_key():
@@ -80,49 +57,21 @@ def account_key():
             with open(os.path.join(d, '.claude.json'), encoding='utf-8', errors='replace') as f:
                 m = re.search(r'"accountUuid"\s*:\s*"([0-9a-fA-F-]{36})"', f.read())
             if m:
-                return short_hash('humanneeded-account:' + m.group(1))
+                return hashlib.sha256(('humanneeded-account:' + m.group(1)).encode()).hexdigest()[:32]
         except OSError:
             pass
     return ''
 
 
-def relay_config():
-    try:
-        with open(RELAY_JSON, encoding='utf-8-sig') as f:
-            cfg = json.load(f)
-    except Exception:
-        cfg = {}
-    if not re.match(r'^hn1\.[0-9a-f]{32}\.[0-9a-f]{64}$', str(cfg.get('token', ''))):
-        cfg = {'token': 'hn1.%s.%s' % (secrets.token_hex(16), secrets.token_hex(32)), 'ws': RELAY_WS, 'enabled': True}
-        os.makedirs(DIR, exist_ok=True)
-        with open(RELAY_JSON, 'w', encoding='utf-8') as f:
-            json.dump(cfg, f)
-        os.chmod(RELAY_JSON, 0o600)
-        log('mcp: relay: created a new channel token in relay.json')
-    cfg.setdefault('ws', RELAY_WS)
-    return cfg
-
-
 def set_state(args):
     args = args or {}
-    log('mcp: set_state args: %s' % json.dumps(args)[:300])
     state = str(args.get('state', '')).lower()
     if state not in STATES:
         return "unknown state '%s'" % state, True
-    sid = args.get('session_id') or args.get('sessionId') or args.get('session')
-    agent = re.sub(r'\s', '', str(args.get('agent') or 'claude'))
-    session = 'default'
-    if sid:
-        h = short_hash(str(sid).strip())
-        add_claim(h)
-        session = 'c-' + h[:16]
-    log('mcp: set_state %s %s %s' % (state, session, agent))
-    run_hn(state, agent, session)
-    host = socket.gethostname()
-    if session == 'default':
-        return ('HumanNeeded check: the puck connector on %s set the light to %s. No session_id arrived, so no '
-                'cloud session was linked.' % (host, state)), False
-    return 'HumanNeeded check: the puck connector on %s got set_state %s and linked session %s' % (host, state, session), False
+    agent = re.sub(r'[^A-Za-z0-9_-]', '', str(args.get('agent') or 'claude')) or 'claude'
+    log('mcp: set_state %s %s' % (state, agent))
+    run_hn(state, agent, 'default')
+    return 'The puck on %s now shows %s.' % (socket.gethostname(), state), False
 
 
 # --- Minimal WebSocket client (RFC 6455, client side) ---
@@ -212,33 +161,22 @@ class WebSocket:
             pass
 
 
-def relay_listener(cfg, acct):
-    parts = cfg['token'].split('.')
-    channel, secret = parts[1], bytes.fromhex(parts[2])
-    url = '%s?ch=%s' % (cfg['ws'], channel)
-    seen = {}
+def relay_listener(key):
+    # One listener per account: other connector instances wait for the lock.
+    lock = open(os.path.join(DIR, 'relay-%s.lock' % key[:12]), 'w')
+    if fcntl:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+    url = '%s?k=%s' % (RELAY_WS, key)
     backoff = 5
     while True:
         ws = None
         try:
             ws = WebSocket(url)
-            log('relay: connected, channel %s...' % channel[:6])
+            log('relay: connected')
             backoff = 5
-            stamp, last_ping, claims = None, time.time(), {}
+            last_ping = time.time()
             while True:
-                try:
-                    st = os.stat(CLAIMS).st_mtime_ns
-                except OSError:
-                    st = 0
-                if st != stamp:
-                    stamp = st
-                    claims = read_claims()
-                    if acct:
-                        claims[acct] = float('inf')
-                    keys = list(claims)[:16]
-                    if keys:
-                        ws.send(json.dumps({'action': 'claim', 'h': keys}))
-                        log('relay: claimed %d cloud session(s) at the relay' % len(keys))
+                # API Gateway drops idle sockets after 10 min; ping every 5.
                 if time.time() - last_ping > 300:
                     ws.send('{"action":"ping"}')
                     last_ping = time.time()
@@ -246,45 +184,19 @@ def relay_listener(cfg, acct):
                 if text is None:
                     continue
                 try:
-                    env = json.loads(text)
-                    body, sig = str(env.get('b', '')), str(env.get('sig', '')).lower()
-                    m = json.loads(body)
-                    now = time.time()
-                    if not sig:
-                        h = str(env.get('h', ''))
-                        if not HEX32.match(h) or str(m.get('h')) != h:
-                            log('relay: dropped an unsigned message with a bad session hash')
-                            continue
-                        if h not in claims:
-                            claims = read_claims()
-                            if acct:
-                                claims[acct] = float('inf')
-                        if h not in claims:
-                            log('relay: dropped a state for unclaimed session %s...' % h[:6])
-                            continue
-                        replay = body
-                    else:
-                        expected = hmac.new(secret, body.encode(), hashlib.sha256).hexdigest()
-                        if not hmac.compare_digest(sig, expected):
-                            log('relay: dropped a message with a bad signature')
-                            continue
-                        replay = sig
-                    for k in [k for k, t in seen.items() if now - t > 600]:
-                        del seen[k]
-                    if replay in seen:
-                        log('relay: dropped a replayed message')
+                    # {"s":state,"h":account key,"u":session hash,"t":unix time,"a":agent}
+                    m = json.loads(text)
+                    if str(m.get('h')) != key:
+                        log('relay: dropped a state for another key')
                         continue
-                    seen[replay] = now
-                    age = now - float(m.get('t', 0))
+                    age = time.time() - float(m.get('t', 0))
                     if abs(age) > 300:
-                        log('relay: dropped a stale message (%d s old)' % age)
+                        log('relay: dropped a stale state (%d s old)' % age)
                         continue
                     state = str(m.get('s', '')).lower()
                     if state not in STATES:
                         continue
-                    u = str(m.get('u', ''))
-                    hh = u if re.match(r'^[0-9a-f]{16}$', u) else re.sub(r'[^0-9a-f]', '', str(m.get('h', '')))
-                    session = 'c-' + hh[:16]
+                    session = 'c-' + re.sub(r'[^0-9a-f]', '', str(m.get('u', '')))
                     agent = re.sub(r'[^A-Za-z0-9_-]', '', str(m.get('a') or 'claude')) or 'claude'
                     log('relay: %s %s %s (%d s)' % (state, session, agent, age))
                     run_hn(state, agent, session)
@@ -301,12 +213,10 @@ def relay_listener(cfg, acct):
 
 TOOLS = [{
     'name': 'set_state',
-    'description': "Shows a session state on the HumanNeeded puck (the desk status light on the user's Mac). Call it "
-                   'when the user asks to test the puck, or to link a cloud session: pass that session_id.',
+    'description': "Shows a state on the HumanNeeded puck (the desk status light on the user's computer). Call it "
+                   'when the user asks to test or preview the puck.',
     'inputSchema': {'type': 'object', 'required': ['state'], 'properties': {
         'state': {'type': 'string', 'enum': list(STATES)},
-        'session_id': {'type': 'string', 'description': 'For a cloud session: the exact session_id given in the HumanNeeded '
-                                                        'hook message. Without it only the light changes.'},
         'agent': {'type': 'string'}}},
 }]
 
@@ -320,12 +230,13 @@ def send(obj):
 def main():
     log('mcp: started %s (pid %d, %s)' % (VERSION, os.getpid(), HERE))
     try:
-        cfg = relay_config()
-        if cfg.get('enabled', True) is not False:
-            acct = account_key()
-            log("mcp: relay: cloud sessions of this Mac's Claude account go to the puck (key %s...)" % acct[:6] if acct
-                else 'mcp: relay: no Claude account found in .claude.json; cloud sessions need linking')
-            threading.Thread(target=relay_listener, args=(cfg, acct), daemon=True).start()
+        key = account_key()
+        if key:
+            os.makedirs(DIR, exist_ok=True)
+            log('mcp: relay: cloud sessions of this Claude account go to the puck (key %s...)' % key[:6])
+            threading.Thread(target=relay_listener, args=(key,), daemon=True).start()
+        else:
+            log("mcp: relay: no Claude account in .claude.json, so cloud sessions can't reach the puck")
     except Exception as e:
         log('mcp: relay: could not start: %s' % e)
     for line in sys.stdin:

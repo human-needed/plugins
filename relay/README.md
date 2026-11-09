@@ -1,24 +1,23 @@
-# HumanNeeded cloud relay (test)
+# HumanNeeded cloud relay
 
-Forwards puck states from cloud Claude sessions to the PC. One CloudFormation stack:
+Forwards puck states from cloud Claude sessions to the user's computer. One CloudFormation stack
+(`template.yaml`) in the project's Region:
 
-- **Function URL** (what the hooks POST to; Cowork sessions connected to a PC can't reach
-  execute-api hosts), response `{"delivered": n}`:
-  - `POST /h/{key}`: unsigned `{"s","h","u","t","a"}`, delivered to the PC that claimed the key.
-    key = sha256("humanneeded-account:" + accountUuid)[:32] (the PC claims its own account's key on
-    connect), or sha256(session_id)[:32] for a session linked through `set_state`.
-  - `POST /s/{channel}`: the same body with `x-hn-sig: hex(HMAC-SHA256(secret, body))`.
-- **WebSocket API** `wss://…/v1?ch={channel}`: the PC's connector listens here and sends
-  `{"action":"claim","h":[key,…]}` for its Claude account key and any sessions linked through
-  `set_state`.
-- **Lambda** (inline in `template.yaml`) forwards the body and signature unchanged to every
-  connection on the channel. It never has the secret; the PC verifies signatures (or
-  that it claimed the session), a 5 min timestamp window and replays.
-- **DynamoDB** maps channel → connection ids (TTL 3 h) and `h<hash>` → connection ids
-  (TTL 24 h). No message content is stored.
+- **Function URL** (what cloud hooks POST to; Cowork sessions connected to a computer can't reach
+  execute-api hosts): `POST /h/{key}` with `{"s","h","u","t","a"}`, response `{"delivered": n}`.
+  key = sha256("humanneeded-account:" + accountUuid)[:32].
+- **WebSocket API** `wss://…/v1?k={key}`: the plugin's connector on the user's computer connects
+  here with its own account's key.
+- **Lambda** (inline in `template.yaml`) forwards each POSTed body unchanged to up to 4
+  connections for that key. The connector accepts only states for its own key that are under
+  5 min old.
+- **DynamoDB** maps key → connection ids (TTL 3 h). No message content is stored.
 
-Channel = 128 random bits, secret = 256 random bits, created by `hn-mcp.ps1` on first start and
-shared as the token `hn1.<channel-hex>.<secret-hex>`.
+Anyone who knows an account's key could send that account's puck states or listen for them;
+the key comes from the account id, which isn't published, and a state carries nothing sensitive.
+
+Limits: the Lambda shares the AWS account's concurrency (10 on the free plan), and the WebSocket
+stage is throttled to 10 requests/s (burst 20). Set a spend limit in AWS Settings → Billing.
 
 Deploy (sign in first with `aws login --profile humanneeded`; no keys are kept in this repo):
 
@@ -26,5 +25,7 @@ Deploy (sign in first with `aws login --profile humanneeded`; no keys are kept i
 sh relay/deploy.sh humanneeded us-east-2
 ```
 
-Deployed 2026-11-08 to us-east-2. After a redeploy that changes the URLs, put `FunctionUrl` (without the trailing slash) into `RELAY_URL` in `host/relay.sh` and `WebSocketUrl` into `$relayWs` in `host/hn-mcp.ps1` and `RELAY_WS` in `host/hn-mcp.py`,
-and run `host/sync-plugins.ps1`. Remove it with `aws cloudformation delete-stack --stack-name humanneeded-relay --profile humanneeded --region us-east-2`.
+If a redeploy changes the URLs, put `FunctionUrl` (without the trailing slash) into `RELAY_URL`
+in `host/relay.sh`, and `WebSocketUrl` into `$relayWs` in `host/hn-mcp.ps1` and `RELAY_WS` in
+`host/hn-mcp.py`, then run `host/sync-plugins.ps1`. Remove the relay with
+`aws cloudformation delete-stack --stack-name humanneeded-relay --profile humanneeded --region us-east-2`.

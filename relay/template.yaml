@@ -1,9 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  HumanNeeded cloud relay. A cloud Claude session's hook POSTs a puck state to /h/{session hash}
-  (or, signed, to /s/{channel}); the relay forwards it unchanged to the PC that claimed that
-  session (or holds that channel) over a WebSocket. No messages are stored: the only table maps
-  channel or session hash -> open WebSocket connection ids, expiring after 3 h / 24 h.
+  HumanNeeded cloud relay. A cloud Claude session's hook POSTs a puck state to /h/{account key};
+  the relay forwards it unchanged over a WebSocket to the user's PC, which connected with that key.
+  No messages are stored: the only table maps account key -> open WebSocket connection ids (3 h TTL).
 
 Metadata:
   AWSToolsMetrics:
@@ -70,64 +69,39 @@ Resources:
           const db = new DynamoDBClient({});
           const ws = new ApiGatewayManagementApiClient({ endpoint: process.env.WS_ENDPOINT });
           const T = process.env.TABLE;
-          const HEX32 = /^[0-9a-f]{32}$/, SIG = /^[0-9a-f]{64}$/;
-          const now = () => Math.floor(Date.now() / 1000);
+          const KEY = /^[0-9a-f]{32}$/;
           const reply = (statusCode, o) => ({ statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(o) });
-          const put = (key, id, hours) => db.send(new PutItemCommand({ TableName: T,
-            Item: { ch: { S: key }, id: { S: id }, ttl: { N: String(now() + hours * 3600) } } }));
 
           exports.handler = async (event) => {
             const rc = event.requestContext || {};
             if (rc.connectionId) {
-              // WebSocket API: the PC's listener.
+              // WebSocket API: the PC's connector connects with ?k=<account key>; pings need no answer.
               if (rc.routeKey === '$connect') {
-                const ch = (event.queryStringParameters || {}).ch || '';
-                if (!HEX32.test(ch)) return { statusCode: 400 };
-                await put(ch, rc.connectionId, 3);
-                return { statusCode: 200 };
-              }
-              if (rc.routeKey === '$default') {
-                // {"action":"claim","h":[...]}: this PC takes the states of these cloud session hashes.
-                let m = {};
-                try { m = JSON.parse(event.body || '{}'); } catch (e) {}
-                if (m.action === 'claim' && Array.isArray(m.h)) {
-                  await Promise.all(m.h.filter((h) => HEX32.test(h)).slice(0, 16).map((h) => put('h' + h, rc.connectionId, 24)));
-                }
+                const k = (event.queryStringParameters || {}).k || '';
+                if (!KEY.test(k)) return { statusCode: 400 };
+                await db.send(new PutItemCommand({ TableName: T, Item: { ch: { S: k }, id: { S: rc.connectionId },
+                  ttl: { N: String(Math.floor(Date.now() / 1000) + 3 * 3600) } } }));
               }
               return { statusCode: 200 };
             }
 
-            // POST /s/{channel} (signed) or /h/{key} (claimed key) from a cloud hook, via the function URL.
-            let pp;
-            {
-              const m = /^\/(h|s)\/([0-9a-f]{32})$/.exec(event.rawPath || '');
-              if (!m || (rc.http || {}).method !== 'POST') return reply(404, { error: 'not found' });
-              pp = m[1] === 's' ? { channel: m[2] } : { hash: m[2] };
-            }
-            const sig = ((event.headers || {})['x-hn-sig'] || '').toLowerCase();
+            // POST /h/{account key} from a cloud session's hook, via the function URL.
+            const m = /^\/h\/([0-9a-f]{32})$/.exec(event.rawPath || '');
+            if (!m || (rc.http || {}).method !== 'POST') return reply(404, { error: 'not found' });
             let body = event.body || '';
             if (event.isBase64Encoded) body = Buffer.from(body, 'base64').toString('utf8');
             if (body.length < 2 || body.length > 512) return reply(400, { error: 'bad request' });
-            let key;
-            if (pp.channel !== undefined) {
-              if (!HEX32.test(pp.channel) || !SIG.test(sig)) return reply(400, { error: 'bad request' });
-              key = pp.channel;
-            } else {
-              if (!HEX32.test(pp.hash || '')) return reply(400, { error: 'bad request' });
-              key = 'h' + pp.hash;
-            }
 
             const conns = await db.send(new QueryCommand({ TableName: T, KeyConditionExpression: 'ch = :c',
-              ExpressionAttributeValues: { ':c': { S: key } }, Limit: 4 }));
-            const data = Buffer.from(JSON.stringify({ b: body, sig: pp.channel !== undefined ? sig : '', h: pp.hash || '' }));
+              ExpressionAttributeValues: { ':c': { S: m[1] } }, Limit: 4 }));
             let delivered = 0;
             await Promise.all((conns.Items || []).map(async (item) => {
               try {
-                await ws.send(new PostToConnectionCommand({ ConnectionId: item.id.S, Data: data }));
+                await ws.send(new PostToConnectionCommand({ ConnectionId: item.id.S, Data: Buffer.from(body) }));
                 delivered++;
               } catch (e) {
                 if (e.name === 'GoneException' || e.$metadata?.httpStatusCode === 410) {
-                  await db.send(new DeleteItemCommand({ TableName: T, Key: { ch: { S: key }, id: item.id } })).catch(() => {});
+                  await db.send(new DeleteItemCommand({ TableName: T, Key: { ch: { S: m[1] }, id: item.id } })).catch(() => {});
                 }
               }
             }));
@@ -205,8 +179,8 @@ Resources:
 
 Outputs:
   FunctionUrl:
-    Description: Cloud hooks POST to <FunctionUrl>h/<hash> or <FunctionUrl>s/<channel>
+    Description: Cloud hooks POST to <FunctionUrl>h/<account key>
     Value: !GetAtt RelayUrl.FunctionUrl
   WebSocketUrl:
-    Description: The PC connects here with ?ch=<channel>
+    Description: The PC connects here with ?k=<account key>
     Value: !Sub wss://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
