@@ -56,16 +56,11 @@ Don't send `working`/`needs`/`done`/`end` events by hand — the plugin's hooks 
 
 ## Cloud sessions (relay, test)
 
-Cloud Claude sessions (claude.ai/code, cloud Cowork) reach the puck through the HumanNeeded relay.
+Cloud Claude sessions (claude.ai/code, cloud Cowork) reach the puck through the HumanNeeded relay,
+routed by the user's Claude account, so normally nothing needs doing.
 
-- When a cloud session isn't linked yet, a `HumanNeeded … relay:` hook message (from this plugin)
-  asks you to call `set_state` once with state `working` and the session_id it gives. Do it, and
-  tell the user in one line that you linked their desk light. If the user asks to "link my desk
-  light", do the same with the session_id from the latest such hook message. It only lights the
-  puck and tells the PC to accept this session's states from the relay; nothing is saved in the
-  cloud session.
-- On the PC, `hn.log` lines starting `relay:` show claims and states that arrived;
-  `%USERPROFILE%\.humanneeded\claims.json` lists the linked sessions (24 h each).
-- Optional for claude.ai/code: put the `token` from `%USERPROFILE%\.humanneeded\relay.json` into
-  the cloud environment's variables as `HN_RELAY` to use signed states instead. Treat it like a
-  password.
+- A `HumanNeeded … relay` hook note says once per session whether states are getting through.
+- If a note says the session isn't linked and the user asks to "link my desk light", call
+  `set_state` with state `working` and the session_id from that note.
+- On the PC, `hn.log` lines starting `relay:` show the account key, claims and the states that
+  arrived. "no Claude account found" means the PC's `.claude.json` has no `accountUuid`.

@@ -4,8 +4,9 @@ Forwards puck states from cloud Claude sessions to the PC. One CloudFormation st
 
 - **Function URL** (what the hooks use; Cowork sessions connected to a PC can't reach
   execute-api hosts) and the same routes on the **HTTP API**, response `{"delivered": n}`:
-  - `POST /h/{hash}` (hash = sha256(session_id)[:32]): unsigned `{"s","h","t","a"}`, delivered
-    to the PC that claimed that session.
+  - `POST /h/{key}`: unsigned `{"s","h","u","t","a"}`, delivered to the PC that claimed the key.
+    key = sha256("humanneeded-account:" + accountUuid)[:32] (the PC claims its own account's key on
+    connect), or sha256(session_id)[:32] for a session linked through `set_state`.
   - `POST /s/{channel}`: the same body with `x-hn-sig: hex(HMAC-SHA256(secret, body))`.
 - **WebSocket API** `wss://…/v1?ch={channel}`: the PC's connector listens here and sends
   `{"action":"claim","h":[hash,…]}` for the cloud sessions that called its `set_state` tool.

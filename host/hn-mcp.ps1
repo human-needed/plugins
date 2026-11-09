@@ -11,7 +11,7 @@ $utf8 = New-Object Text.UTF8Encoding $false
 [Console]::OutputEncoding = $utf8
 $hn = Join-Path $PSScriptRoot 'hn.ps1'
 $logFile = Join-Path $env:USERPROFILE '.humanneeded\hn.log'
-$version = '0.1.22'
+$version = '0.1.23'
 
 function Write-Log([string]$text) {
     try {
@@ -95,7 +95,7 @@ function Invoke-SetState($arguments) {
     return "HumanNeeded check: the puck connector on $env:COMPUTERNAME got set_state $state and linked session $session"
 }
 
-# --- Cloud relay listener (test, 0.1.22) ---
+# --- Cloud relay listener (test, 0.1.23) ---
 # Cloud Claude sessions can't reach this PC, so their hooks POST signed states to the
 # HumanNeeded relay on AWS, which forwards them over a WebSocket this connector holds open.
 # The channel and HMAC secret live in %USERPROFILE%\.humanneeded\relay.json as the token
@@ -123,8 +123,23 @@ function Get-RelayConfig {
     return $config
 }
 
+# The account key: sha256("humanneeded-account:" + Claude accountUuid)[:32]. The cloud VM's
+# ~/.claude.json holds the same accountUuid, so its hook posts there and this PC claims it
+# without any step in the session. Read with a regex: .claude.json can be large.
+function Get-AccountKey {
+    foreach ($dir in @($env:CLAUDE_CONFIG_DIR, $env:USERPROFILE)) {
+        if (-not $dir) { continue }
+        $f = Join-Path $dir '.claude.json'
+        try {
+            $m = [regex]::Match([IO.File]::ReadAllText($f), '"accountUuid"\s*:\s*"([0-9a-fA-F-]{36})"')
+            if ($m.Success) { return Get-SessionHash ('humanneeded-account:' + $m.Groups[1].Value) }
+        } catch {}
+    }
+    return ''
+}
+
 $relayListener = {
-    param($config, $hn, $logFile, $claimsFile)
+    param($config, $hn, $logFile, $claimsFile, $accountKey)
     function Log([string]$text) {
         try { Add-Content $logFile ('{0:yyyy-MM-dd HH:mm:ss}  relay: {1}' -f (Get-Date), $text) } catch {}
     }
@@ -141,6 +156,7 @@ $relayListener = {
             $o = Get-Content $claimsFile -Raw -ErrorAction Stop | ConvertFrom-Json
             foreach ($p in $o.PSObject.Properties) { if ([long]$p.Value -gt $now) { $c[$p.Name] = [long]$p.Value } }
         } catch {}
+        if ($accountKey) { $c[$accountKey] = [long]::MaxValue }   # this PC's Claude account, always
         return $c
     }
     function Send-Text($socket, [string]$text) {
@@ -232,7 +248,8 @@ $relayListener = {
                     if ([Math]::Abs($now - [long]$m.t) -gt 300) { Log "dropped a stale message ($($now - [long]$m.t) s old)"; continue }
                     $state = "$($m.s)".ToLower()
                     if (@('working', 'needs', 'done', 'idle', 'end') -notcontains $state) { continue }
-                    $hh = "$($m.h)" -replace '[^0-9a-f]', ''
+                    # Account-routed states carry the session's own short hash in "u".
+                    $hh = if ("$($m.u)" -match '^[0-9a-f]{16}$') { "$($m.u)" } else { "$($m.h)" -replace '[^0-9a-f]', '' }
                     $session = 'c-' + $hh.Substring(0, [Math]::Min(16, $hh.Length))
                     $agent = if ($m.a) { "$($m.a)" -replace '[^A-Za-z0-9_-]', '' } else { 'claude' }
                     Log "$state $session $agent ($($now - [long]$m.t) s)"
@@ -255,8 +272,10 @@ function Start-RelayListener {
     try {
         $config = Get-RelayConfig
         if ($config.enabled -eq $false -or "$($config.ws)" -like '*REPLACE_AFTER_DEPLOY*') { return }
+        $accountKey = Get-AccountKey
+        Write-Log $(if ($accountKey) { "relay: cloud sessions of this PC's Claude account go to the puck (key $($accountKey.Substring(0, 6))...)" } else { 'relay: no Claude account found in .claude.json; cloud sessions need linking' })
         $ps = [PowerShell]::Create()
-        $null = $ps.AddScript($relayListener).AddArgument($config).AddArgument($hn).AddArgument($logFile).AddArgument($claimsFile)
+        $null = $ps.AddScript($relayListener).AddArgument($config).AddArgument($hn).AddArgument($logFile).AddArgument($claimsFile).AddArgument($accountKey)
         $script:relayHandle = $ps.BeginInvoke()
         $script:relayPs = $ps
     } catch { Write-Log "relay: could not start: $_" }

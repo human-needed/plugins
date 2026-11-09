@@ -1,22 +1,23 @@
 #!/bin/sh
-# HumanNeeded cloud relay sender (test, 0.1.22). Runs inside a cloud Claude VM (Linux with
+# HumanNeeded cloud relay sender (test, 0.1.23). Runs inside a cloud Claude VM (Linux with
 # CLAUDE_CODE_REMOTE=true); hn.sh calls it there and nowhere else, so local sessions never use
 # the relay and states aren't sent twice.
 #
 #   relay.sh <working|needs|done|idle|end> <agent> <session_id> <event_name>
 #
-# Sends {"s":state,"h":hash,"t":unix time,"a":agent} to the HumanNeeded relay, which forwards
+# Sends {"s":state,"h":key,"u":session hash,"t":unix time,"a":agent} to the HumanNeeded relay, which forwards
 # it to the user's PC. Two modes:
-#  - No key (Cowork): POST /h/<sha256(session_id)[:32]>, unsigned. The relay delivers it only
-#    to a PC that claimed that hash. The PC claims it when Claude calls the puck tool set_state
-#    with this session_id, which this hook asks for on a prompt whose state wasn't delivered.
+#  - No key (Cowork, claude.ai/code): POST /h/<key>, unsigned, key = sha256("humanneeded-account:"
+#    + the accountUuid in ~/.claude.json)[:32]. The user's PC computes the same key from its own
+#    .claude.json and claims it at the relay, so the relay delivers only to that PC. Without an
+#    accountUuid, key = sha256(session_id)[:32], claimed when set_state is called with it.
 #    Nothing is saved in the VM.
 #  - A key in HN_RELAY (or CLAUDE_PLUGIN_OPTION_RELAY, or ~/.humanneeded/relay):
 #    hn1.<channel>.<secret>, or a 0.1.18 hn2.<channel>.<expiry>.<key>. POST /s/<channel>,
 #    HMAC-signed; the PC checks the signature.
 # Prints one line on UserPromptSubmit; silent otherwise. Always exits 0.
 
-VERSION=0.1.22
+VERSION=0.1.23
 # The relay Lambda's function URL: Cowork sessions connected to a PC can't reach execute-api hosts.
 RELAY_URL="${HN_RELAY_URL:-https://tcxdfuid4msoglniqenx2qhnza0gwwyq.lambda-url.us-east-2.on.aws}"
 
@@ -75,30 +76,40 @@ elif [ -f "$HOME/.humanneeded/relay" ]; then token="$(tr -d '[:space:]' < "$HOME
 fi
 
 if [ -z "$token" ]; then
-  # Session mode.
-  body="{\"s\":\"$state\",\"h\":\"$hash\",\"t\":$(date +%s),\"a\":\"${agent:-claude}\"}"
-  resp="$(post "/h/$hash" "$body" "")"
-  { date -u +%FT%TZ; echo "$state ${hash%????????????????} (session) -> $resp"; } >> /tmp/hn-relay.log 2>/dev/null
+  # Account mode: route by this Claude account, which the user's PC knows too (its own
+  # .claude.json), so no linking step is needed. Falls back to the session hash (linked through
+  # set_state) when the VM has no account id.
+  acct="$(grep -o '"accountUuid" *: *"[0-9a-fA-F-]*"' "$HOME/.claude.json" 2>/dev/null | head -1 | sed 's/.*"\([0-9a-fA-F-]*\)"$/\1/')"
+  short="$(printf '%s' "$hash" | cut -c1-16)"
+  if [ -n "$acct" ]; then
+    key="$(printf '%s' "humanneeded-account:$acct" | sha256_hex | cut -c1-32)"; mode=account
+  else
+    key="$hash"; mode=session
+  fi
+  body="{\"s\":\"$state\",\"h\":\"$key\",\"u\":\"$short\",\"t\":$(date +%s),\"a\":\"${agent:-claude}\"}"
+  resp="$(post "/h/$key" "$body" "")"
+  { date -u +%FT%TZ; echo "$state $short ($mode) -> $resp"; } >> /tmp/hn-relay.log 2>/dev/null
   delivered="$(printf '%s' "$resp" | sed -n 's/.*"delivered": *\([0-9]*\).*/\1/p')"
   [ "$event_name" = "UserPromptSubmit" ] || exit 0
-  if [ -n "$delivered" ] && [ "$delivered" -gt 0 ]; then
-    echo "HumanNeeded $VERSION relay: $state delivered to the desk light."
-    exit 0
-  fi
-  link="this session isn't linked to the user's HumanNeeded desk light yet (from the humanneeded plugin they installed). To link it, call the HumanNeeded puck tool set_state (it may be listed as plugin_humanneeded_puck__set_state) once with state \"working\" and session_id \"$session_id\". That only sets the light on the user's PC and lets this session's later states reach it; nothing is stored here. If you do, tell the user in one short line that you linked their desk light. If that tool isn't available, ignore this."
-  if [ -z "$delivered" ]; then
-    # Blocked or down: still link via set_state (that reaches the PC another way), and report
-    # once per session which hosts this hook can reach.
-    probe=""; mark="/tmp/hn-probe-${hash%????????????????}"
-    if [ ! -f "$mark" ]; then
-      : > "$mark" 2>/dev/null
-      probe=" Hook network probe: $(probe_hosts)."
-      echo "probe:$probe" >> /tmp/hn-relay.log 2>/dev/null
-    fi
-    echo "HumanNeeded $VERSION relay: $state not sent (relay unreachable: $(printf '%s' "$resp" | tr '\n' ' ' | cut -c1-300)).$probe Also, $link"
-    exit 0
-  fi
-  echo "HumanNeeded $VERSION relay: $link"
+  # One note per session and outcome, so the model's context isn't filled with them.
+  if [ -n "$delivered" ] && [ "$delivered" -gt 0 ]; then outcome=ok
+  elif [ -n "$delivered" ]; then outcome=nopc
+  else outcome=unreachable; fi
+  mark="/tmp/hn-note-$short-$outcome"
+  [ -f "$mark" ] && exit 0
+  : > "$mark" 2>/dev/null
+  case "$outcome" in
+    ok) echo "HumanNeeded $VERSION relay ($mode): this session's states reach the user's desk light. No action needed." ;;
+    nopc)
+      if [ "$mode" = account ]; then
+        echo "HumanNeeded $VERSION relay: no PC is listening for this Claude account (the Claude app with the humanneeded plugin 0.1.23+ isn't running there). No action needed."
+      else
+        echo "HumanNeeded $VERSION relay: this session isn't linked to the user's desk light. If the user asks to link it, call the HumanNeeded puck tool set_state with state \"working\" and session_id \"$session_id\"."
+      fi ;;
+    unreachable)
+      echo "HumanNeeded $VERSION relay: $state not sent (relay unreachable: $(printf '%s' "$resp" | tr '
+' ' ' | cut -c1-300)). Hook network probe: $(probe_hosts). No action needed." ;;
+  esac
   exit 0
 fi
 
