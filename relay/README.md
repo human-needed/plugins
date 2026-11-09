@@ -2,13 +2,17 @@
 
 Forwards puck states from cloud Claude sessions to the PC. One CloudFormation stack:
 
-- **HTTP API** `POST /s/{channel}`: a cloud hook sends `{"s","h","t","a"}` with header
-  `x-hn-sig: hex(HMAC-SHA256(secret, body))`. Response `{"delivered": n}`.
-- **WebSocket API** `wss://…/v1?ch={channel}`: the PC's connector listens here.
+- **HTTP API**, response `{"delivered": n}`:
+  - `POST /h/{hash}` (hash = sha256(session_id)[:32]): unsigned `{"s","h","t","a"}`, delivered
+    to the PC that claimed that session.
+  - `POST /s/{channel}`: the same body with `x-hn-sig: hex(HMAC-SHA256(secret, body))`.
+- **WebSocket API** `wss://…/v1?ch={channel}`: the PC's connector listens here and sends
+  `{"action":"claim","h":[hash,…]}` for the cloud sessions that called its `set_state` tool.
 - **Lambda** (inline in `template.yaml`) forwards the body and signature unchanged to every
-  connection on the channel. It never has the secret; the PC verifies signature, a 5 min
-  timestamp window and replays.
-- **DynamoDB** maps channel → connection ids (TTL 3 h). No message content is stored.
+  connection on the channel. It never has the secret; the PC verifies signatures (or
+  that it claimed the session), a 5 min timestamp window and replays.
+- **DynamoDB** maps channel → connection ids (TTL 3 h) and `h<hash>` → connection ids
+  (TTL 24 h). No message content is stored.
 
 Channel = 128 random bits, secret = 256 random bits, created by `hn-mcp.ps1` on first start and
 shared as the token `hn1.<channel-hex>.<secret-hex>`.

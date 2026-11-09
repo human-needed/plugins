@@ -11,7 +11,7 @@ $utf8 = New-Object Text.UTF8Encoding $false
 [Console]::OutputEncoding = $utf8
 $hn = Join-Path $PSScriptRoot 'hn.ps1'
 $logFile = Join-Path $env:USERPROFILE '.humanneeded\hn.log'
-$version = '0.1.18'
+$version = '0.1.19'
 
 function Write-Log([string]$text) {
     try {
@@ -28,7 +28,7 @@ function Send-Message($message) {
 $tools = @(
     @{
         name        = 'set_state'
-        description = 'Shows a session state on the HumanNeeded puck. The plugin calls it itself; call it only when the user asks to test the puck connection.'
+        description = 'Shows a session state on the HumanNeeded puck (the desk status light on the user''s PC). Call it when the user asks to test the puck, or when a "HumanNeeded" hook message in a cloud session asks you to: pass that session_id. It only sets the light and links the session to it; nothing is stored in the session.'
         inputSchema = @{
             type       = 'object'
             properties = @{
@@ -39,25 +39,33 @@ $tools = @(
             required   = @('state')
         }
     }
-    @{
-        name        = 'relay_pair'
-        description = 'Pairs a cloud Claude session with the HumanNeeded puck on this PC. Call it only when a "HumanNeeded relay" hook message asks for it; it returns a shell command that saves a 7-day relay key in the cloud session.'
-        inputSchema = @{ type = 'object'; properties = @{} }
-    }
 )
 
-# A 7-day key for one cloud session: HMAC(secret, "hn2:<expiry>"). The master secret never
-# leaves this PC; the listener re-derives the key from the expiry each message carries.
-function Get-PairToken {
-    $config = Get-RelayConfig
-    $parts = "$($config.token)".Split('.')
-    $key = [byte[]]($parts[2] -split '(..)' | Where-Object { $_ } | ForEach-Object { [Convert]::ToByte($_, 16) })
-    $expiry = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 7 * 86400
-    $hmac = New-Object Security.Cryptography.HMACSHA256 (, $key)
-    $sub = -join ($hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes("hn2:$expiry")) | ForEach-Object { $_.ToString('x2') })
-    Write-Log "relay_pair: issued a key for channel $($parts[1].Substring(0, 6))..., valid 7 days"
-    $token = "hn2.$($parts[1]).$expiry.$sub"
-    return "Run this one command in the cloud session's shell (it saves the HumanNeeded relay key; nothing else is needed), then carry on with the user's request:`nmkdir -p ~/.humanneeded && printf '%s' '$token' > ~/.humanneeded/relay"
+# First 32 hex digits of sha256(session_id); the cloud hook computes the same.
+function Get-SessionHash([string]$id) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    (-join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($id)) | ForEach-Object { $_.ToString('x2') })).Substring(0, 32)
+}
+
+# Claimed cloud sessions, shared by every connector instance through claims.json
+# ({hash: expiry}); the instance holding the relay WebSocket sends them to the relay.
+$claimsFile = Join-Path $env:USERPROFILE '.humanneeded\claims.json'
+function Add-RelayClaim([string]$h) {
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    for ($try = 0; $try -lt 5; $try++) {
+        try {
+            $claims = @{}
+            if (Test-Path $claimsFile) {
+                $old = Get-Content $claimsFile -Raw | ConvertFrom-Json
+                foreach ($p in $old.PSObject.Properties) { if ([long]$p.Value -gt $now) { $claims[$p.Name] = [long]$p.Value } }
+            }
+            $claims[$h] = $now + 86400
+            New-Item -ItemType Directory -Force (Split-Path $claimsFile) | Out-Null
+            [IO.File]::WriteAllText($claimsFile, ($claims | ConvertTo-Json -Compress), $utf8)
+            Write-Log "relay: claimed cloud session $($h.Substring(0, 6))..."
+            return
+        } catch { Start-Sleep -Milliseconds 100 }
+    }
 }
 
 # Runs hn.ps1 in its own process, its output captured so it can't reach the MCP stream.
@@ -66,19 +74,29 @@ function Invoke-SetState($arguments) {
     if (@('working', 'needs', 'done', 'idle', 'end') -notcontains $state) { return "unknown state '$state'" }
     $session = if ($arguments.session_id) { "$($arguments.session_id)" } else { 'default' }
     $agent = if ($arguments.agent) { "$($arguments.agent)" -replace '\s', '' } else { 'claude' }
+    if ($session -ne 'default') {
+        # Claim this session at the relay so its cloud hook's states reach this PC, and show it
+        # under the same name the relayed states use.
+        $h = Get-SessionHash $session
+        Add-RelayClaim $h
+        $session = 'c-' + $h.Substring(0, 16)
+    }
     Write-Log "set_state $state $session $agent"
     $null = (@{ session_id = $session } | ConvertTo-Json -Compress) |
         & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $hn $state $agent 2>&1
     return "HumanNeeded check: the puck connector on $env:COMPUTERNAME got set_state $state for session $session"
 }
 
-# --- Cloud relay listener (test, 0.1.18) ---
+# --- Cloud relay listener (test, 0.1.19) ---
 # Cloud Claude sessions can't reach this PC, so their hooks POST signed states to the
 # HumanNeeded relay on AWS, which forwards them over a WebSocket this connector holds open.
 # The channel and HMAC secret live in %USERPROFILE%\.humanneeded\relay.json as the token
-# "hn1.<channel>.<secret>" (created on first start); the same token goes into the plugin's
-# "relay" option so the cloud hook can sign. The relay never sees the secret: each message is
-# checked here (signature, timestamp within 5 min, no replays) before it reaches hn.ps1.
+# "hn1.<channel>.<secret>" (created on first start). Two ways in:
+#  - cloud sessions without a key (Cowork): the hook asks Claude to call set_state with the
+#    session id once; this PC then claims sha256(session_id)[:32] at the relay, and the hook's
+#    unsigned states for that hash come here. Accepted only for hashes claimed here.
+#  - with the token in HN_RELAY (claude.ai/code env): signed states on the channel.
+# Every message must be under 5 min old and not a replay before it reaches hn.ps1.
 $relayWs = 'wss://r9k4y2qgz5.execute-api.us-east-2.amazonaws.com/v1'
 $relayFile = Join-Path $env:USERPROFILE '.humanneeded\relay.json'
 
@@ -98,7 +116,7 @@ function Get-RelayConfig {
 }
 
 $relayListener = {
-    param($config, $hn, $logFile)
+    param($config, $hn, $logFile, $claimsFile)
     function Log([string]$text) {
         try { Add-Content $logFile ('{0:yyyy-MM-dd HH:mm:ss}  relay: {1}' -f (Get-Date), $text) } catch {}
     }
@@ -107,6 +125,21 @@ $relayListener = {
     $key = [byte[]]($parts[2] -split '(..)' | Where-Object { $_ } | ForEach-Object { [Convert]::ToByte($_, 16) })
     $hmac = New-Object Security.Cryptography.HMACSHA256 (, $key)
     $seen = @{}
+    # Unexpired claimed session hashes from claims.json (written by set_state in any instance).
+    function Read-Claims {
+        $c = @{}
+        try {
+            $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            $o = Get-Content $claimsFile -Raw -ErrorAction Stop | ConvertFrom-Json
+            foreach ($p in $o.PSObject.Properties) { if ([long]$p.Value -gt $now) { $c[$p.Name] = [long]$p.Value } }
+        } catch {}
+        return $c
+    }
+    function Send-Text($socket, [string]$text) {
+        $bytes = [Text.Encoding]::UTF8.GetBytes($text)
+        $socket.SendAsync((New-Object ArraySegment[byte] (, $bytes)), 'Text', $true, [Threading.CancellationToken]::None).Wait(5000) | Out-Null
+    }
+    $claims = @{}
 
     # One listener per channel: other connector instances with the same token wait for the mutex.
     $mutex = New-Object Threading.Mutex $false, "Local\HumanNeededRelay-$($channel.Substring(0, 12))"
@@ -127,15 +160,26 @@ $relayListener = {
             $text = ''
             $receive = $null
             $lastPing = [DateTime]::UtcNow
+            $claimsStamp = -1   # forces a claim of every session on each new connection
             while ($socket.State -eq 'Open') {
                 if (-not $receive) {
                     $receive = $socket.ReceiveAsync((New-Object ArraySegment[byte] (, $buffer)), [Threading.CancellationToken]::None)
                 }
-                if (-not $receive.Wait(30000)) {
+                if (-not $receive.Wait(1000)) {
+                    # New claims from set_state: send them all (the relay just refreshes them).
+                    $stamp = try { (Get-Item $claimsFile -ErrorAction Stop).LastWriteTimeUtc.Ticks } catch { 0 }
+                    if ($stamp -ne $claimsStamp) {
+                        $claimsStamp = $stamp
+                        $claims = Read-Claims
+                        $list = @($claims.Keys | Select-Object -First 16)
+                        if ($list.Count) {
+                            Send-Text $socket (@{ action = 'claim'; h = $list } | ConvertTo-Json -Compress)
+                            Log "claimed $($list.Count) cloud session(s) at the relay"
+                        }
+                    }
                     # API Gateway drops idle sockets after 10 min; ping every 5.
                     if (([DateTime]::UtcNow - $lastPing).TotalMinutes -ge 5) {
-                        $ping = [Text.Encoding]::UTF8.GetBytes('{"action":"ping"}')
-                        $socket.SendAsync((New-Object ArraySegment[byte] (, $ping)), 'Text', $true, [Threading.CancellationToken]::None).Wait(5000) | Out-Null
+                        Send-Text $socket '{"action":"ping"}'
                         $lastPing = [DateTime]::UtcNow
                     }
                     continue
@@ -153,6 +197,14 @@ $relayListener = {
                     $m = $body | ConvertFrom-Json
                     $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
                     $signer = $hmac
+                    if (-not $sig) {
+                        # Unsigned state for a claimed cloud session (POST /h/{hash}).
+                        $h = "$($envelope.h)"
+                        if ($h -notmatch '^[0-9a-f]{32}$' -or "$($m.h)" -ne $h) { Log 'dropped an unsigned message with a bad session hash'; continue }
+                        if (-not $claims.ContainsKey($h)) { $claims = Read-Claims }
+                        if (-not $claims.ContainsKey($h)) { Log "dropped a state for unclaimed session $($h.Substring(0, 6))..."; continue }
+                        $replayKey = $body
+                    } else {
                     if ($null -ne $m.x) {
                         # hn2 key from relay_pair: HMAC(secret, "hn2:<expiry>"), valid until expiry.
                         $expiry = [long]$m.x
@@ -164,13 +216,16 @@ $relayListener = {
                     $diff = $sig.Length -bxor $expected.Length
                     for ($i = 0; $i -lt [Math]::Min($sig.Length, $expected.Length); $i++) { $diff = $diff -bor ([int][char]$sig[$i] -bxor [int][char]$expected[$i]) }
                     if ($diff -ne 0) { Log 'dropped a message with a bad signature'; continue }
+                    $replayKey = $sig
+                    }
                     foreach ($old in @($seen.Keys)) { if ($now - $seen[$old] -gt 600) { $seen.Remove($old) } }
-                    if ($seen.ContainsKey($sig)) { Log 'dropped a replayed message'; continue }
-                    $seen[$sig] = $now
+                    if ($seen.ContainsKey($replayKey)) { Log 'dropped a replayed message'; continue }
+                    $seen[$replayKey] = $now
                     if ([Math]::Abs($now - [long]$m.t) -gt 300) { Log "dropped a stale message ($($now - [long]$m.t) s old)"; continue }
                     $state = "$($m.s)".ToLower()
                     if (@('working', 'needs', 'done', 'idle', 'end') -notcontains $state) { continue }
-                    $session = 'c-' + ("$($m.h)" -replace '[^0-9a-f]', '')
+                    $hh = "$($m.h)" -replace '[^0-9a-f]', ''
+                    $session = 'c-' + $hh.Substring(0, [Math]::Min(16, $hh.Length))
                     $agent = if ($m.a) { "$($m.a)" -replace '[^A-Za-z0-9_-]', '' } else { 'claude' }
                     Log "$state $session $agent ($($now - [long]$m.t) s)"
                     $null = (@{ session_id = $session } | ConvertTo-Json -Compress) |
@@ -193,7 +248,7 @@ function Start-RelayListener {
         $config = Get-RelayConfig
         if ($config.enabled -eq $false -or "$($config.ws)" -like '*REPLACE_AFTER_DEPLOY*') { return }
         $ps = [PowerShell]::Create()
-        $null = $ps.AddScript($relayListener).AddArgument($config).AddArgument($hn).AddArgument($logFile)
+        $null = $ps.AddScript($relayListener).AddArgument($config).AddArgument($hn).AddArgument($logFile).AddArgument($claimsFile)
         $script:relayHandle = $ps.BeginInvoke()
         $script:relayPs = $ps
     } catch { Write-Log "relay: could not start: $_" }
@@ -217,7 +272,6 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
             'tools/call' {
                 $text = switch ($request.params.name) {
                     'set_state' { Invoke-SetState $request.params.arguments }
-                    'relay_pair' { Get-PairToken }
                     default { throw "unknown tool $($request.params.name)" }
                 }
                 $result = @{ content = @(@{ type = 'text'; text = $text }); isError = ($text -like 'unknown state*') }

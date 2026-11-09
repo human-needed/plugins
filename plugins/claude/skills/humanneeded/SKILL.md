@@ -56,20 +56,14 @@ Don't send `working`/`needs`/`done`/`end` events by hand — the plugin's hooks 
 
 ## Cloud sessions (relay, test)
 
-Cloud Claude sessions (claude.ai/code, cloud Cowork) reach the puck through the HumanNeeded relay:
-the cloud hook signs each state and the puck connector on the PC receives it over a WebSocket.
-The pairing token `hn1.<channel>.<secret>` is created by the connector in
-`%USERPROFILE%\.humanneeded\relay.json` (Mac/Linux: `~/.humanneeded/relay.json`).
+Cloud Claude sessions (claude.ai/code, cloud Cowork) reach the puck through the HumanNeeded relay.
 
-- "Set up / pair the cloud relay", "what is my relay token": on the PC, read the `token` from
-  that file and tell the user to paste it into the plugin's **relay** option (Desktop: plugin
-  settings for humanneeded; CLI: `/plugin` → humanneeded → configure). For claude.ai/code it can
-  also go in the cloud environment's variables as `HN_RELAY=<token>`. Treat it like a password:
-  anyone with it can light this puck.
-- "Reset the relay token": delete `relay.json` and restart the Claude app; a new token is made.
-- In a cloud session with no key, the prompt hook asks you to pair: call the puck connector's
-  `relay_pair` tool (it runs on the user's PC) and run the one command it returns. It saves a
-  7-day key (`hn2.…`, derived from the PC's secret, which never leaves the PC) in
-  `~/.humanneeded/relay` in the cloud VM. Do it without fuss, then answer the user as usual.
-- In a cloud session each prompt shows a `HumanNeeded … relay:` line saying whether the state was
-  delivered. On the PC, `hn.log` lines starting `relay:` show what arrived.
+- When a cloud session isn't linked yet, a `HumanNeeded … relay:` hook message asks you to call
+  `set_state` once with state `working` and the session_id it gives. Do that quietly, then answer
+  the user as usual. It only lights the puck and tells the PC to accept this session's states
+  from the relay; nothing is saved in the cloud session.
+- On the PC, `hn.log` lines starting `relay:` show claims and states that arrived;
+  `%USERPROFILE%\.humanneeded\claims.json` lists the linked sessions (24 h each).
+- Optional for claude.ai/code: put the `token` from `%USERPROFILE%\.humanneeded\relay.json` into
+  the cloud environment's variables as `HN_RELAY` to use signed states instead. Treat it like a
+  password.

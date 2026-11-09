@@ -1,9 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  HumanNeeded cloud relay. A cloud Claude session's hook POSTs a signed puck state to
-  /s/{channel}; the relay forwards it unchanged to the PC holding a WebSocket on that channel.
-  The relay never sees the channel's HMAC secret (the PC checks signatures) and stores no
-  messages: the only table maps channel -> open WebSocket connection ids, expiring after 3 h.
+  HumanNeeded cloud relay. A cloud Claude session's hook POSTs a puck state to /h/{session hash}
+  (or, signed, to /s/{channel}); the relay forwards it unchanged to the PC that claimed that
+  session (or holds that channel) over a WebSocket. No messages are stored: the only table maps
+  channel or session hash -> open WebSocket connection ids, expiring after 3 h / 24 h.
 
 Metadata:
   AWSToolsMetrics:
@@ -64,16 +64,17 @@ Resources:
           WS_ENDPOINT: !Sub https://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
       Code:
         ZipFile: |
-          // HumanNeeded relay (inline, kept short on purpose).
+          // HumanNeeded relay (inline: must stay under 4096 characters).
           const { DynamoDBClient, PutItemCommand, DeleteItemCommand, QueryCommand } = require('@aws-sdk/client-dynamodb');
           const { ApiGatewayManagementApiClient, PostToConnectionCommand } = require('@aws-sdk/client-apigatewaymanagementapi');
           const db = new DynamoDBClient({});
           const ws = new ApiGatewayManagementApiClient({ endpoint: process.env.WS_ENDPOINT });
-          const TABLE = process.env.TABLE;
-          const CH = /^[0-9a-f]{32}$/;
-          const SIG = /^[0-9a-f]{64}$/;
-          const MAX_CONN = 4;
-          const reply = (statusCode, obj) => ({ statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(obj) });
+          const T = process.env.TABLE;
+          const HEX32 = /^[0-9a-f]{32}$/, SIG = /^[0-9a-f]{64}$/;
+          const now = () => Math.floor(Date.now() / 1000);
+          const reply = (statusCode, o) => ({ statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(o) });
+          const put = (key, id, hours) => db.send(new PutItemCommand({ TableName: T,
+            Item: { ch: { S: key }, id: { S: id }, ttl: { N: String(now() + hours * 3600) } } }));
 
           exports.handler = async (event) => {
             const rc = event.requestContext || {};
@@ -81,26 +82,40 @@ Resources:
               // WebSocket API: the PC's listener.
               if (rc.routeKey === '$connect') {
                 const ch = (event.queryStringParameters || {}).ch || '';
-                if (!CH.test(ch)) return { statusCode: 400 };
-                const ttl = Math.floor(Date.now() / 1000) + 3 * 3600;
-                await db.send(new PutItemCommand({ TableName: TABLE, Item: { ch: { S: ch }, id: { S: rc.connectionId }, ttl: { N: String(ttl) } } }));
+                if (!HEX32.test(ch)) return { statusCode: 400 };
+                await put(ch, rc.connectionId, 3);
                 return { statusCode: 200 };
               }
-              return { statusCode: 200 }; // $disconnect / $default (keepalive pings): nothing to do
+              if (rc.routeKey === '$default') {
+                // {"action":"claim","h":[...]}: this PC takes the states of these cloud session hashes.
+                let m = {};
+                try { m = JSON.parse(event.body || '{}'); } catch (e) {}
+                if (m.action === 'claim' && Array.isArray(m.h)) {
+                  await Promise.all(m.h.filter((h) => HEX32.test(h)).slice(0, 16).map((h) => put('h' + h, rc.connectionId, 24)));
+                }
+              }
+              return { statusCode: 200 };
             }
 
-            // HTTP API: POST /s/{channel} from a cloud session's hook.
-            const ch = (event.pathParameters || {}).channel || '';
+            // HTTP API: POST /s/{channel} (signed with the channel secret) or POST /h/{hash} (a claimed
+            // cloud session, unsigned) from a cloud session's hook.
+            const pp = event.pathParameters || {};
             const sig = ((event.headers || {})['x-hn-sig'] || '').toLowerCase();
             let body = event.body || '';
             if (event.isBase64Encoded) body = Buffer.from(body, 'base64').toString('utf8');
-            if (!CH.test(ch) || !SIG.test(sig) || body.length < 2 || body.length > 512) return reply(400, { error: 'bad request' });
+            if (body.length < 2 || body.length > 512) return reply(400, { error: 'bad request' });
+            let key;
+            if (pp.channel !== undefined) {
+              if (!HEX32.test(pp.channel) || !SIG.test(sig)) return reply(400, { error: 'bad request' });
+              key = pp.channel;
+            } else {
+              if (!HEX32.test(pp.hash || '')) return reply(400, { error: 'bad request' });
+              key = 'h' + pp.hash;
+            }
 
-            const conns = await db.send(new QueryCommand({
-              TableName: TABLE, KeyConditionExpression: 'ch = :c',
-              ExpressionAttributeValues: { ':c': { S: ch } }, Limit: MAX_CONN,
-            }));
-            const data = Buffer.from(JSON.stringify({ b: body, sig }));
+            const conns = await db.send(new QueryCommand({ TableName: T, KeyConditionExpression: 'ch = :c',
+              ExpressionAttributeValues: { ':c': { S: key } }, Limit: 4 }));
+            const data = Buffer.from(JSON.stringify({ b: body, sig: pp.channel !== undefined ? sig : '', h: pp.hash || '' }));
             let delivered = 0;
             await Promise.all((conns.Items || []).map(async (item) => {
               try {
@@ -108,7 +123,7 @@ Resources:
                 delivered++;
               } catch (e) {
                 if (e.name === 'GoneException' || e.$metadata?.httpStatusCode === 410) {
-                  await db.send(new DeleteItemCommand({ TableName: TABLE, Key: { ch: { S: ch }, id: item.id } })).catch(() => {});
+                  await db.send(new DeleteItemCommand({ TableName: T, Key: { ch: { S: key }, id: item.id } })).catch(() => {});
                 }
               }
             }));
@@ -171,6 +186,9 @@ Resources:
   HttpPostRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties: { ApiId: !Ref HttpApi, RouteKey: 'POST /s/{channel}', Target: !Sub 'integrations/${HttpIntegration}' }
+  HttpSessionRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties: { ApiId: !Ref HttpApi, RouteKey: 'POST /h/{hash}', Target: !Sub 'integrations/${HttpIntegration}' }
 
   HttpStage:
     Type: AWS::ApiGatewayV2::Stage
