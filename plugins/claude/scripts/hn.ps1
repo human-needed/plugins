@@ -1,13 +1,14 @@
 # HumanNeeded host script for Windows (Windows PowerShell 5.1, no installs).
 #
 #   hn.ps1 <working|needs|done|idle|end> [agent]   reads hook JSON on stdin for session_id
+#   & hn.ps1 <state> [agent] -SessionId <id>       (the connector, in its own process: no stdin)
 #   hn.ps1 set <key> <value> | get <key|all> | mute <minutes> | test <state> | hello | status
 #
 # Always exits 0 within ~2 s and is silent for agent events, so a missing puck never
 # disturbs the agent. Other commands print the puck's reply.
 # Every run adds a line to %USERPROFILE%\.humanneeded\hn.log (for troubleshooting).
 
-param([string]$Command = 'hello', [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest = @())
+param([string]$Command = 'hello', [string]$SessionId = '', [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest = @())
 
 $ErrorActionPreference = 'Stop'
 $clock = [Diagnostics.Stopwatch]::StartNew()
@@ -89,6 +90,7 @@ function Write-Log([string]$sent, [string]$reply) {
 
 # session_id from the hook's JSON on stdin, or "default".
 function Read-SessionId {
+    if ($SessionId) { return ($SessionId -replace '\s', '') }
     if (-not [Console]::IsInputRedirected) { return 'default' }
     try {
         $id = ([Console]::In.ReadToEnd() | ConvertFrom-Json).session_id

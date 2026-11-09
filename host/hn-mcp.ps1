@@ -47,14 +47,14 @@ $tools = @(
     }
 )
 
-# Runs hn.ps1 in its own process, its output captured so it can't reach the MCP stream.
+# Runs hn.ps1 in this process (no new PowerShell to start), its output captured so it can't
+# reach the MCP stream. -SessionId keeps it from reading stdin, which is the MCP stream here.
 function Invoke-SetState($arguments) {
     $state = "$($arguments.state)".ToLower()
     if ($states -notcontains $state) { return "unknown state '$state'" }
     $agent = if ($arguments.agent) { "$($arguments.agent)" -replace '[^A-Za-z0-9_-]', '' } else { 'claude' }
     Write-Log "set_state $state $agent"
-    $null = '{"session_id":"default"}' |
-        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $hn $state $agent 2>&1
+    $null = & $hn $state $agent -SessionId default 2>&1
     return "The puck on $env:COMPUTERNAME now shows $state."
 }
 
@@ -129,8 +129,7 @@ $relayListener = {
                     $session = 'c-' + ("$($m.u)" -replace '[^0-9a-f]', '')
                     $agent = if ($m.a) { "$($m.a)" -replace '[^A-Za-z0-9_-]', '' } else { 'claude' }
                     Log "$state $session $agent ($age s)"
-                    $null = (@{ session_id = $session } | ConvertTo-Json -Compress) |
-                        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $hn $state $agent 2>&1
+                    $null = & $hn $state $agent -SessionId $session 2>&1
                 } catch { Log "bad message: $_" }
             }
             Log "disconnected ($($socket.State))"
