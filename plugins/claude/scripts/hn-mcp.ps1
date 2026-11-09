@@ -11,7 +11,7 @@ $utf8 = New-Object Text.UTF8Encoding $false
 [Console]::OutputEncoding = $utf8
 $hn = Join-Path $PSScriptRoot 'hn.ps1'
 $logFile = Join-Path $env:USERPROFILE '.humanneeded\hn.log'
-$version = '0.1.19'
+$version = '0.1.20'
 
 function Write-Log([string]$text) {
     try {
@@ -87,7 +87,7 @@ function Invoke-SetState($arguments) {
     return "HumanNeeded check: the puck connector on $env:COMPUTERNAME got set_state $state for session $session"
 }
 
-# --- Cloud relay listener (test, 0.1.19) ---
+# --- Cloud relay listener (test, 0.1.20) ---
 # Cloud Claude sessions can't reach this PC, so their hooks POST signed states to the
 # HumanNeeded relay on AWS, which forwards them over a WebSocket this connector holds open.
 # The channel and HMAC secret live in %USERPROFILE%\.humanneeded\relay.json as the token
