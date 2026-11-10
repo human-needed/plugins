@@ -4,12 +4,12 @@
 #
 #   test.sh <start|working|needs|done|end> <agent>     hook JSON on stdin
 #
-# Per session it keeps a random 32-byte secret S in /tmp/hn-test (mode 700). Until a state has
-# reached the user's computer, the SessionStart and UserPromptSubmit hooks ask the model to call
-# the puck's set_state once with pair=S; that call goes over Anthropic's bridge to the computer.
-# Every state is signed with HMAC(S,"hn-test-mac") and POSTed to the relay under
-# HMAC(S,"hn-test-channel")[:32]. The relay never sees S or the mac key.
-# Log: /tmp/hn-test/test.log (never contains S). Always exits 0.
+# Until this VM has the computer's link code, the SessionStart and UserPromptSubmit hooks ask
+# the model to call the puck's set_state once. The reply to that call (which went over
+# Anthropic's bridge to the user's computer) carries "hn2-<key>"; the PostToolUse hook reads
+# it from the tool reply and saves it in /tmp/hn-test (mode 700). States are then POSTed to
+# the relay under that key.
+# Log: /tmp/hn-test/test.log (never contains the key). Always exits 0.
 
 [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || [ -n "${HN_TEST_SIMULATE:-}" ] || exit 0
 RELAY_URL="${HN_TEST_RELAY_URL:-https://tcxdfuid4msoglniqenx2qhnza0gwwyq.lambda-url.us-east-2.on.aws}"
@@ -31,42 +31,47 @@ sha256_hex() {
   elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 -r | cut -c1-64
   else python3 -c 'import hashlib,sys;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'; fi
 }
-hmac_hex() { # stdin, $1 = hex key
-  if command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 -mac HMAC -macopt "hexkey:$1" -r | cut -c1-64
-  else python3 -c 'import hmac,hashlib,sys;print(hmac.new(bytes.fromhex(sys.argv[1]),sys.stdin.buffer.read(),hashlib.sha256).hexdigest())' "$1"; fi
-}
-rand_hex() { head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'; }
-
 h="$(printf '%s' "$sid" | sha256_hex | cut -c1-16)"
-printf '%s' "$h" | grep -Eq '^[0-9a-f]{16}$' || { log "no sha256 tool; nothing sent"; exit 0; }
-keyf="$dir/$h.pair"; okf="$dir/$h.ok"; askf="$dir/$h.asked"
-[ -s "$keyf" ] || { rand_hex 32 > "$keyf"; log "session $h: new pairing secret"; }
-S="$(cat "$keyf")"
-printf '%s' "$S" | grep -Eq '^[0-9a-f]{64}$' || { log "session $h: bad secret file"; exit 0; }
-ch="$(printf 'hn-test-channel' | hmac_hex "$S" | cut -c1-32)"
-mk="$(printf 'hn-test-mac' | hmac_hex "$S")"
-printf '%s' "$mk" | grep -Eq '^[0-9a-f]{64}$' || { log "no HMAC tool (openssl or python3); nothing sent"; exit 0; }
+printf '%s' "$h" | grep -Eq '^[0-9a-f]{16}$' || h=0000000000000000
+linkf="$dir/link"; askf="$dir/asked"
+
+# The reply to the puck's set_state carries the link code. Only that tool's reply is trusted.
+if [ "$event" = "PostToolUse" ]; then
+  tool="$(field tool_name)"
+  case "$tool" in
+    *set_state*)
+      code="$(printf '%s' "$input" | grep -o 'hn2-[0-9a-f]\{32\}' | head -n1)"
+      has=no; printf '%s' "$input" | grep -q '"tool_response"' && has=yes
+      log "chat $h: PostToolUse for $tool: ${#input} bytes, tool_response=$has, link code $([ -n "$code" ] && echo found || echo NOT FOUND)"
+      if [ -n "$code" ] && [ "${code#hn2-}" != "$(cat "$linkf" 2>/dev/null)" ]; then
+        printf '%s' "${code#hn2-}" > "$linkf"; log "chat $h: LINKED (saved the link code)"
+      fi
+      ;;
+  esac
+fi
+key="$(cat "$linkf" 2>/dev/null)"
+printf '%s' "$key" | grep -Eq '^[0-9a-f]{32}$' || key=""
 
 case "$state" in
   working|needs|done|idle|end)
-    t="$(date +%s)"; n="$(rand_hex 8)"
-    m="$(printf 'hn-test-v1|%s|%s|%s|%s|%s' "$ch" "$state" "$t" "$n" "$agent" | hmac_hex "$mk")"
-    body="{\"v\":1,\"s\":\"$state\",\"t\":$t,\"n\":\"$n\",\"a\":\"$agent\",\"m\":\"$m\"}"
-    resp="$(curl -sS --max-time 4 -X POST -H 'content-type: application/json' --data-binary "$body" \
-      -w ' http=%{http_code}' "$RELAY_URL/h/$ch" 2>&1 | tr '\r\n' '  ' | cut -c1-200)"
-    delivered="$(printf '%s' "$resp" | sed -n 's/.*"delivered": *\([0-9]*\).*/\1/p')"
-    log "session $h channel ${ch%????????????????????????} $event $state -> ${resp}"
-    if [ "${delivered:-0}" -ge 1 ] && [ ! -f "$okf" ]; then : > "$okf"; log "session $h: PAIRED (first state delivered)"; fi
+    if [ -n "$key" ]; then
+      body="{\"v\":2,\"s\":\"$state\",\"a\":\"$agent\",\"h\":\"$h\"}"
+      resp="$(curl -sS --max-time 4 -X POST -H 'content-type: application/json' --data-binary "$body" \
+        -w ' http=%{http_code}' "$RELAY_URL/h/$key" 2>&1 | sed "s/$key/<key>/g" | tr '\r\n' '  ' | cut -c1-200)"
+      log "chat $h: $event $state -> ${resp}"
+    else
+      log "chat $h: $event $state not sent (not linked yet)"
+    fi
     ;;
 esac
 
-# Ask the model to pair, on the hooks whose output reaches it, until a state got through.
+# Ask the model to make the linking call, on the hooks whose output reaches it.
 case "$event" in
   SessionStart|UserPromptSubmit)
-    if [ ! -f "$okf" ]; then
+    if [ -z "$key" ]; then
       asked=$(( $(cat "$askf" 2>/dev/null || echo 0) + 1 )); echo "$asked" > "$askf"
-      log "session $h: asked the model to pair (#$asked, $event)"
-      echo "HumanNeeded test (the user's desk-light test): this cloud session isn't linked to the user's puck yet. Before anything else, call the HumanNeeded test puck's set_state tool once with state \"working\" and pair \"$S\" (exactly this value), then carry on with the user's request. No need to mention this to the user."
+      log "chat $h: asked the model to link (#$asked, $event)"
+      echo "HumanNeeded test (the user's desk-light test): this cloud session isn't linked to the user's puck yet. Before anything else, call the HumanNeeded test puck's set_state tool once with state \"working\", then carry on with the user's request. No need to mention this to the user."
     fi
     ;;
 esac
