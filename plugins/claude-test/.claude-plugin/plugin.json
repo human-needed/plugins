@@ -1,6 +1,6 @@
 {
   "name": "humanneeded-test",
-  "version": "0.2.0-test.2",
+  "version": "0.2.0-test.3",
   "description": "TEST BUILD (Windows): tries a cloud link with per-session pairing over Anthropic's bridge and signed states. Not for customers.",
   "author": {
     "name": "HumanNeeded"
