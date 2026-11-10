@@ -15,6 +15,11 @@
       "name": "humanneeded-mac",
       "source": "./plugins/claude-mac",
       "description": "macOS: lights up and chimes the HumanNeeded puck when Claude is working, done, or needs you. Needs python3 for cloud sessions."
+    },
+    {
+      "name": "humanneeded-lab",
+      "source": "./plugins/claude-lab",
+      "description": "TEST BUILD (Windows): cloud link via per-session pairing and signed states. Not for customers."
     }
   ]
 }

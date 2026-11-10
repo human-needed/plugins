@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "puck": {
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${CLAUDE_PLUGIN_ROOT}/scripts/hn-mcp-lab.ps1"
+      ]
+    }
+  }
+}
