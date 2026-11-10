@@ -8,7 +8,7 @@
         "-ExecutionPolicy",
         "Bypass",
         "-File",
-        "${CLAUDE_PLUGIN_ROOT}/scripts/hn-mcp-lab.ps1"
+        "${CLAUDE_PLUGIN_ROOT}/scripts/hn-mcp-test.ps1"
       ]
     }
   }

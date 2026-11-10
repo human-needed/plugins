@@ -7,7 +7,7 @@
             "type": "command",
             "command": "bash",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/lab.sh",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/test.sh",
               "start",
               "claude"
             ],
@@ -24,7 +24,7 @@
             "type": "command",
             "command": "bash",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/lab.sh",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/test.sh",
               "working",
               "claude"
             ],
@@ -42,7 +42,7 @@
             "type": "command",
             "command": "bash",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/lab.sh",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/test.sh",
               "needs",
               "claude"
             ],
@@ -61,7 +61,7 @@
             "type": "command",
             "command": "bash",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/lab.sh",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/test.sh",
               "needs",
               "claude"
             ],
@@ -80,7 +80,7 @@
             "type": "command",
             "command": "bash",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/lab.sh",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/test.sh",
               "needs",
               "claude"
             ],
@@ -99,7 +99,7 @@
             "type": "command",
             "command": "bash",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/lab.sh",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/test.sh",
               "working",
               "claude"
             ],
@@ -117,7 +117,7 @@
             "type": "command",
             "command": "bash",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/lab.sh",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/test.sh",
               "done",
               "claude"
             ],
@@ -135,7 +135,7 @@
             "type": "command",
             "command": "bash",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/lab.sh",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/test.sh",
               "end",
               "claude"
             ],

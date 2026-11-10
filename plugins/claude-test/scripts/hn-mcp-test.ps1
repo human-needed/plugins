@@ -1,14 +1,14 @@
-# HumanNeeded LAB connector (test build, not for customers). Windows PowerShell 5.1, MCP over stdio.
+# HumanNeeded TEST connector (test build, not for customers). Windows PowerShell 5.1, MCP over stdio.
 #
 # Tests a cloud link that needs no account key and no setup:
 #  1. The cloud VM's hook makes a random 32-byte secret S for its session and asks the model to
 #     call set_state once with pair=S. That call crosses Anthropic's own bridge (remote-devices),
 #     which only this Claude account's linked computer can receive.
-#  2. Both sides derive  channel = HMAC(S, "hn-lab-channel")[:32]  and  mac key = HMAC(S, "hn-lab-mac").
+#  2. Both sides derive  channel = HMAC(S, "hn-test-channel")[:32]  and  mac key = HMAC(S, "hn-test-mac").
 #  3. The VM signs every state with the mac key and POSTs it to the relay under the channel. This
 #     connector listens on that channel and accepts only messages with a valid signature, a time
 #     within 5 minutes and a nonce it hasn't seen. The relay only ever sees the channel.
-# Every call and every accepted or rejected message adds a line to %USERPROFILE%\.humanneeded\lab\lab.log.
+# Every call and every accepted or rejected message adds a line to %USERPROFILE%\.humanneeded\test\test.log.
 # The secret itself is never logged.
 
 $ErrorActionPreference = 'Stop'
@@ -16,15 +16,15 @@ $utf8 = New-Object Text.UTF8Encoding $false
 [Console]::InputEncoding = $utf8
 [Console]::OutputEncoding = $utf8
 $hn = Join-Path $PSScriptRoot 'hn.ps1'
-$labDir = if ($env:HN_LAB_HOME) { $env:HN_LAB_HOME } else { Join-Path $env:USERPROFILE '.humanneeded\lab' }
-$logFile = Join-Path $labDir 'lab.log'
-$pairsFile = Join-Path $labDir 'pairs.json'
-$relayWs = if ($env:HN_LAB_WS) { $env:HN_LAB_WS } else { 'wss://r9k4y2qgz5.execute-api.us-east-2.amazonaws.com/v1' }
+$testDir = if ($env:HN_TEST_HOME) { $env:HN_TEST_HOME } else { Join-Path $env:USERPROFILE '.humanneeded\test' }
+$logFile = Join-Path $testDir 'test.log'
+$pairsFile = Join-Path $testDir 'pairs.json'
+$relayWs = if ($env:HN_TEST_WS) { $env:HN_TEST_WS } else { 'wss://r9k4y2qgz5.execute-api.us-east-2.amazonaws.com/v1' }
 $states = @('working', 'needs', 'done', 'idle', 'end')
 $maxPairs = 8
 $pairHours = 24
 $version = try { (Get-Content (Join-Path $PSScriptRoot '..\.claude-plugin\plugin.json') -Raw | ConvertFrom-Json).version } catch { 'dev' }
-New-Item -ItemType Directory -Force $labDir | Out-Null
+New-Item -ItemType Directory -Force $testDir | Out-Null
 
 function Write-Log([string]$text) {
     try { Add-Content $logFile ('{0:yyyy-MM-dd HH:mm:ss}  mcp: {1}' -f (Get-Date), $text) } catch {}
@@ -56,13 +56,13 @@ $crypto = {
 $tools = @(
     @{
         name        = 'set_state'
-        description = 'Shows a state on the HumanNeeded puck (the desk status light on the user''s computer). LAB test build. Call it when the user asks to test the puck, or when a "HumanNeeded lab" hook message asks you to pair: then pass its pair code exactly.'
+        description = 'Shows a state on the HumanNeeded puck (the desk status light on the user''s computer). TEST test build. Call it when the user asks to test the puck, or when a "HumanNeeded test" hook message asks you to pair: then pass its pair code exactly.'
         inputSchema = @{
             type       = 'object'
             properties = @{
                 state = @{ type = 'string'; enum = $states }
                 agent = @{ type = 'string' }
-                pair  = @{ type = 'string'; description = 'The 64-character pairing code from a "HumanNeeded lab" hook message, exactly as given.' }
+                pair  = @{ type = 'string'; description = 'The 64-character pairing code from a "HumanNeeded test" hook message, exactly as given.' }
                 tag   = @{ type = 'string'; description = 'A test label from the user''s test prompt; logged on the computer.' }
             }
             required   = @('state')
@@ -110,17 +110,17 @@ function Invoke-SetState($arguments) {
     if ($pair) {
         if ($pair -notmatch '^[0-9a-f]{64}$') {
             Write-Log "call: set_state $state tag=$tag pair=INVALID (length $($pair.Length))"
-            return @{ err = $true; text = 'HumanNeeded lab: the pair code must be exactly 64 hex characters, as given in the hook message.' }
+            return @{ err = $true; text = 'HumanNeeded test: the pair code must be exactly 64 hex characters, as given in the hook message.' }
         }
-        $channel = (Get-Hmac $pair 'hn-lab-channel').Substring(0, 32)
-        Add-Pair $channel (Get-Hmac $pair 'hn-lab-mac')
+        $channel = (Get-Hmac $pair 'hn-test-channel').Substring(0, 32)
+        Add-Pair $channel (Get-Hmac $pair 'hn-test-mac')
         $session = 'c-' + $channel.Substring(0, 16)
         $pairLog = 'channel ' + $channel.Substring(0, 8)
         $note = ' This cloud session is now paired with it.'
     }
     Write-Log "call: set_state $state agent=$agent tag=$tag pair=$pairLog"
     $null = & $hn $state $agent -SessionId $session 2>&1
-    @{ err = $false; text = "HumanNeeded lab: the puck on $env:COMPUTERNAME shows $state.$note" }
+    @{ err = $false; text = "HumanNeeded test: the puck on $env:COMPUTERNAME shows $state.$note" }
 }
 
 # Listens on every paired channel (one WebSocket each) and verifies what arrives.
@@ -131,7 +131,7 @@ $listener = {
     function Now { [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
 
     # One listener per PC user: other connector instances wait for the mutex.
-    $mutex = New-Object Threading.Mutex $false, 'Local\HumanNeededLabRelay'
+    $mutex = New-Object Threading.Mutex $false, 'Local\HumanNeededTestRelay'
     while ($true) { try { if ($mutex.WaitOne(30000)) { break } } catch [Threading.AbandonedMutexException] { break } }
     Log 'listener running'
 
@@ -203,7 +203,7 @@ $listener = {
                 $st = "$($m.s)"; $t = "$($m.t)"; $n = "$($m.n)"; $a = "$($m.a)"; $sig = "$($m.m)"
                 if ("$($m.v)" -ne '1' -or $states -notcontains $st -or $t -notmatch '^\d{1,12}$' -or $n -notmatch '^[0-9a-f]{16}$' -or
                     $a -notmatch '^[A-Za-z0-9_-]{0,16}$' -or $sig -notmatch '^[0-9a-f]{64}$') { Log "channel $short REJECTED malformed message"; continue }
-                $expect = Get-Hmac $c.mk "hn-lab-v1|$ch|$st|$t|$n|$a"
+                $expect = Get-Hmac $c.mk "hn-test-v1|$ch|$st|$t|$n|$a"
                 if (-not (Test-Equal $expect $sig)) { Log "channel $short REJECTED bad signature ($st)"; continue }
                 $now = Now; $age = $now - [long]$t
                 if ([Math]::Abs($age) -gt 300) { Log "channel $short REJECTED stale ($age s old)"; continue }
@@ -239,7 +239,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         switch ($request.method) {
             'initialize' {
                 $protocol = if ($request.params.protocolVersion) { $request.params.protocolVersion } else { '2025-06-18' }
-                $result = @{ protocolVersion = $protocol; capabilities = @{ tools = @{} }; serverInfo = @{ name = 'humanneeded-lab'; version = $version } }
+                $result = @{ protocolVersion = $protocol; capabilities = @{ tools = @{} }; serverInfo = @{ name = 'humanneeded-test'; version = $version } }
             }
             'tools/list' { $result = @{ tools = $tools } }
             'tools/call' {
