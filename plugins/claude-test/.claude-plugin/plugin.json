@@ -1,7 +1,7 @@
 {
   "name": "humanneeded-test",
-  "version": "0.2.0-test.3",
-  "description": "TEST BUILD (Windows): tries a cloud link with per-session pairing over Anthropic's bridge and signed states. Not for customers.",
+  "version": "0.2.0-test.4",
+  "description": "HumanNeeded test build (Windows): lights the puck for local chats through its USB port and for cloud chats through the relay, using a random key made on this computer and handed to each cloud chat by the link tool.",
   "author": {
     "name": "HumanNeeded"
   }

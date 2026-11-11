@@ -8,7 +8,8 @@
 # disturbs the agent. Other commands print the puck's reply.
 # Every run adds a line to %USERPROFILE%\.humanneeded\hn.log (for troubleshooting).
 
-param([string]$Command = 'hello', [string]$SessionId = '', [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest = @())
+# -SessionId is by name only: "hn.ps1 working claude" must put "claude" in $Rest (the agent).
+param([Parameter(Position = 0)][string]$Command = 'hello', [string]$SessionId = '', [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest = @())
 
 $ErrorActionPreference = 'Stop'
 $clock = [Diagnostics.Stopwatch]::StartNew()

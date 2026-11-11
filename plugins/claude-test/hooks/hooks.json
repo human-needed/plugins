@@ -1,4 +1,5 @@
 {
+  "description": "HumanNeeded test build: local chats drive the puck directly; cloud chats go through the relay.",
   "hooks": {
     "SessionStart": [
       {
@@ -22,6 +23,24 @@
         "hooks": [
           {
             "type": "command",
+            "command": "powershell.exe",
+            "async": true,
+            "timeout": 5,
+            "args": [
+              "-NoProfile",
+              "-NonInteractive",
+              "-WindowStyle",
+              "Hidden",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
+              "working",
+              "claude"
+            ]
+          },
+          {
+            "type": "command",
             "command": "bash",
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/scripts/test.sh",
@@ -38,6 +57,24 @@
       {
         "matcher": "AskUserQuestion",
         "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "async": true,
+            "timeout": 5,
+            "args": [
+              "-NoProfile",
+              "-NonInteractive",
+              "-WindowStyle",
+              "Hidden",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
+              "needs",
+              "claude"
+            ]
+          },
           {
             "type": "command",
             "command": "bash",
@@ -59,6 +96,24 @@
         "hooks": [
           {
             "type": "command",
+            "command": "powershell.exe",
+            "async": true,
+            "timeout": 5,
+            "args": [
+              "-NoProfile",
+              "-NonInteractive",
+              "-WindowStyle",
+              "Hidden",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
+              "needs",
+              "claude"
+            ]
+          },
+          {
+            "type": "command",
             "command": "bash",
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/scripts/test.sh",
@@ -76,6 +131,24 @@
       {
         "matcher": "permission_prompt|idle_prompt",
         "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "async": true,
+            "timeout": 5,
+            "args": [
+              "-NoProfile",
+              "-NonInteractive",
+              "-WindowStyle",
+              "Hidden",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
+              "needs",
+              "claude"
+            ]
+          },
           {
             "type": "command",
             "command": "bash",
@@ -97,6 +170,24 @@
         "hooks": [
           {
             "type": "command",
+            "command": "powershell.exe",
+            "async": true,
+            "timeout": 5,
+            "args": [
+              "-NoProfile",
+              "-NonInteractive",
+              "-WindowStyle",
+              "Hidden",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
+              "working",
+              "claude"
+            ]
+          },
+          {
+            "type": "command",
             "command": "bash",
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/scripts/test.sh",
@@ -115,6 +206,24 @@
         "hooks": [
           {
             "type": "command",
+            "command": "powershell.exe",
+            "async": true,
+            "timeout": 5,
+            "args": [
+              "-NoProfile",
+              "-NonInteractive",
+              "-WindowStyle",
+              "Hidden",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
+              "done",
+              "claude"
+            ]
+          },
+          {
+            "type": "command",
             "command": "bash",
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/scripts/test.sh",
@@ -131,6 +240,24 @@
     "SessionEnd": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "async": true,
+            "timeout": 5,
+            "args": [
+              "-NoProfile",
+              "-NonInteractive",
+              "-WindowStyle",
+              "Hidden",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
+              "end",
+              "claude"
+            ]
+          },
           {
             "type": "command",
             "command": "bash",

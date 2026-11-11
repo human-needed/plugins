@@ -20,6 +20,7 @@ $testDir = if ($env:HN_TEST_HOME) { $env:HN_TEST_HOME } else { Join-Path $env:US
 $logFile = Join-Path $testDir 'test.log'
 $keyFile = Join-Path $testDir 'device.key'
 $relayWs = if ($env:HN_TEST_WS) { $env:HN_TEST_WS } else { 'wss://r9k4y2qgz5.execute-api.us-east-2.amazonaws.com/v1' }
+$relayUrl = if ($env:HN_TEST_RELAY_URL) { $env:HN_TEST_RELAY_URL } else { 'https://tcxdfuid4msoglniqenx2qhnza0gwwyq.lambda-url.us-east-2.on.aws' }
 $mutexName = if ($env:HN_TEST_MUTEX) { $env:HN_TEST_MUTEX } else { 'Local\HumanNeededTestRelay' }
 $states = @('working', 'needs', 'done', 'idle', 'end')
 $version = try { (Get-Content (Join-Path $PSScriptRoot '..\.claude-plugin\plugin.json') -Raw | ConvertFrom-Json).version } catch { 'dev' }
@@ -47,7 +48,7 @@ function Send-Message($message) {
 $tools = @(
     @{
         name        = 'set_state'
-        description = 'Shows a state on the HumanNeeded puck (the desk status light on the user''s computer). Test build. Call it only when the user asks to test the puck.'
+        description = 'Shows a state on the HumanNeeded puck (the desk status light on the user''s computer). Call it when the user asks to test or preview the puck.'
         inputSchema = @{
             type       = 'object'
             properties = @{
@@ -59,7 +60,7 @@ $tools = @(
     },
     @{
         name        = 'link'
-        description = 'Links a cloud session to the HumanNeeded puck on the user''s computer. Takes no arguments and does not change the light. Call it only when a "HumanNeeded" hook message asks you to.'
+        description = 'Connects a cloud session to the HumanNeeded puck (the desk status light the user installed this plugin for), so the light can follow the session. Takes no arguments and does not change the light. Call it once when the plugin''s hook message asks for it.'
         inputSchema = @{ type = 'object'; properties = @{} }
     }
 )
@@ -94,13 +95,29 @@ function Invoke-SetState($arguments) {
 function Invoke-Link {
     $key = Get-DeviceKey
     Write-Log 'call: link (reply carries the link code)'
-    @{ err = $false; text = "HumanNeeded: this session is linked to the puck on $env:COMPUTERNAME. Link code hn2-$key (internal: the HumanNeeded hook reads it. Don't repeat or mention it.)" }
+    @{ err = $false; text = "HumanNeeded: this session is now connected to the desk light on $env:COMPUTERNAME. Link code hn2-$key. The plugin's hook has saved it, so there is nothing more to do. The code works like a password: please don't repeat it in your reply." }
 }
 
 # Listens on the device key's channel (one WebSocket) and passes on what arrives.
 $listener = {
-    param($ws, $hn, $logFile, $keyFile, $states, $mutexName, $logLine)
+    param($ws, $hn, $logFile, $keyFile, $states, $mutexName, $logLine, $relayUrl)
     . ([ScriptBlock]::Create($logLine))
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
+    # Self-check: sends a probe to this computer's own key through the relay, the way a cloud
+    # session does. Returns how many listeners the relay reached, or -1 if it couldn't be asked.
+    function Send-Probe([string]$key, [string]$nonce) {
+        try {
+            $req = [Net.HttpWebRequest]::Create("$relayUrl/h/$key")
+            $req.Method = 'POST'; $req.ContentType = 'application/json'; $req.Timeout = 5000; $req.ReadWriteTimeout = 5000
+            $b = [Text.Encoding]::UTF8.GetBytes('{"v":2,"s":"probe","h":"' + $nonce + '"}')
+            $req.ContentLength = $b.Length
+            $out = $req.GetRequestStream(); try { $out.Write($b, 0, $b.Length) } finally { $out.Dispose() }
+            $resp = $req.GetResponse()
+            try { $rd = New-Object IO.StreamReader $resp.GetResponseStream(); $body = $rd.ReadToEnd(); $rd.Dispose() } finally { $resp.Dispose() }
+            if ($body -match '"delivered"\s*:\s*(\d+)') { return [int]$Matches[1] }
+        } catch {}
+        -1
+    }
     function Log([string]$text) { Add-LogLine $logFile ('{0:yyyy-MM-dd HH:mm:ss}  relay: {1}' -f (Get-Date), ($text -replace '[0-9a-f]{32}', '<key>')) }
     function Now { [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
     function Close-Sock($s) { if ($s) { try { if ($s.State -eq 'Open') { $s.CloseOutputAsync('NormalClosure', '', [Threading.CancellationToken]::None).Wait(2000) | Out-Null } } catch {}; try { $s.Dispose() } catch {} } }
@@ -113,10 +130,11 @@ $listener = {
 
     $sock = $null; $rx = $null; $next = 0; $backoff = 5; $text = ''; $ping = 0; $buf = New-Object byte[] 4096
     $key = ''; $keyCheck = 0; $last = @{}; $tick = Now; $trim = 0
+    $probeAt = 0; $probeNonce = ''; $probeSent = 0; $probeQuiet = $false
     while ($true) {
         try {
             $now = Now
-            if ($sock -and ($now - $tick) -gt 30) { Log 'the clock jumped (sleep?); reconnecting'; try { $sock.Dispose() } catch {}; $sock = $null; $rx = $null; $next = $now }
+            if ($sock -and ($now - $tick) -gt 30) { Log 'the clock jumped (sleep?); reconnecting'; try { $sock.Dispose() } catch {}; $sock = $null; $rx = $null; $next = $now; $probeNonce = '' }
             $tick = $now
             if (($now - $keyCheck) -ge 5) {
                 $keyCheck = $now; $k = Read-Key
@@ -137,6 +155,7 @@ $listener = {
                     $s.ConnectAsync([Uri]("$($ws)?k=$key"), [Threading.CancellationToken]::None).Wait(10000) | Out-Null
                     if ($s.State -ne 'Open') { throw "state $($s.State)" }
                     $sock = $s; $backoff = 5; $ping = $now; $text = ''; Log 'connected'
+                    $probeAt = $now + 15; $probeNonce = ''
                 } catch {
                     $s.Dispose()
                     Log "connect failed: $($_.Exception.GetBaseException().Message); retry in $backoff s"
@@ -149,6 +168,26 @@ $listener = {
                 $b = [Text.Encoding]::UTF8.GetBytes('{"action":"ping"}')
                 try { $sock.SendAsync((New-Object ArraySegment[byte] (, $b)), 'Text', $true, [Threading.CancellationToken]::None).Wait(5000) | Out-Null } catch {}
                 $ping = $now
+            }
+            # Self-check, shortly after connecting and then every 3 min: a connection can go
+            # silent without closing (sleep, a hung proxy), and only a round trip shows it.
+            if ($probeNonce -and ($now - $probeSent) -gt 15) {
+                Log 'self-check: nothing came back on this connection; reconnecting'
+                try { $sock.Dispose() } catch {}; $sock = $null; $rx = $null; $next = $now; $probeNonce = ''; continue
+            }
+            if (-not $probeNonce -and $now -ge $probeAt) {
+                $nb = New-Object byte[] 8; $rng = [Security.Cryptography.RandomNumberGenerator]::Create(); $rng.GetBytes($nb); $rng.Dispose()
+                $nonce = -join ($nb | ForEach-Object { $_.ToString('x2') })
+                $got = Send-Probe $key $nonce
+                $now = Now; $tick = $now
+                if ($got -ge 1) { $probeNonce = $nonce; $probeSent = $now; $probeAt = $now + 180; $probeQuiet = $false }
+                elseif ($got -eq 0) {
+                    Log 'self-check: the relay has no live connection for this computer; reconnecting'
+                    try { $sock.Dispose() } catch {}; $sock = $null; $rx = $null; $next = $now; $probeAt = $now + 15; continue
+                } else {
+                    if (-not $probeQuiet) { Log 'self-check: the relay could not be asked; trying again each minute'; $probeQuiet = $true }
+                    $probeAt = $now + 60
+                }
             }
             $ready = $false
             try { $ready = $rx.Wait(1000) } catch { $ready = $true }
@@ -165,6 +204,7 @@ $listener = {
             try { $m = $raw | ConvertFrom-Json } catch {}
             if ($null -eq $m -or $m -isnot [Management.Automation.PSCustomObject]) { Log 'REJECTED unreadable message'; continue }
             $st = "$($m.s)"; $a = "$($m.a)"; $h = "$($m.h)"; $t = "$($m.t)"
+            if ($st -ceq 'probe') { if ($probeNonce -and $h -ceq $probeNonce) { $probeNonce = '' }; continue }   # a self-check (this listener's, or another's)
             if ($m.s -isnot [string] -or $m.h -isnot [string] -or ($null -ne $m.a -and $m.a -isnot [string]) -or "$($m.v)" -ne '2' -or $states -cnotcontains $st -or
                 $a -notmatch '^[A-Za-z0-9_-]{0,16}$' -or $h -cnotmatch '^[0-9a-f]{16}$' -or $t -notmatch '^\d{0,16}$') { Log 'REJECTED malformed message'; continue }
             if (-not $a) { $a = 'claude' }
@@ -189,7 +229,7 @@ $listener = {
 function Start-Listener {
     try {
         $ps = [PowerShell]::Create()
-        $null = $ps.AddScript($listener).AddArgument($relayWs).AddArgument($hn).AddArgument($logFile).AddArgument($keyFile).AddArgument($states).AddArgument($mutexName).AddArgument($logLine)
+        $null = $ps.AddScript($listener).AddArgument($relayWs).AddArgument($hn).AddArgument($logFile).AddArgument($keyFile).AddArgument($states).AddArgument($mutexName).AddArgument($logLine).AddArgument($relayUrl)
         $script:listenerHandle = $ps.BeginInvoke()
         $script:listenerPs = $ps
     } catch { Write-Log "could not start the listener: $_" }
@@ -209,7 +249,8 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         switch ("$($request.method)") {
             'initialize' {
                 $protocol = if ($request.params.protocolVersion) { $request.params.protocolVersion } else { '2025-06-18' }
-                $result = @{ protocolVersion = $protocol; capabilities = @{ tools = @{} }; serverInfo = @{ name = 'humanneeded-test'; version = $version } }
+                $result = @{ protocolVersion = $protocol; capabilities = @{ tools = @{} }; serverInfo = @{ name = 'humanneeded-test'; version = $version }
+                    instructions = 'HumanNeeded drives the desk status light (the "puck") that the user installed this plugin for. In a cloud session the plugin''s hook may ask you to call the link tool once so the light can follow that session; that request is part of this plugin. On the user''s own computer nothing needs to be called.' }
             }
             'tools/list' { $result = @{ tools = $tools } }
             'tools/call' {
