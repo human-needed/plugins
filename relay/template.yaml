@@ -2,7 +2,8 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   HumanNeeded cloud relay. A cloud Claude session's hook POSTs a puck state to /h/{account key};
   the relay forwards it unchanged over a WebSocket to the user's PC, which connected with that key.
-  No messages are stored: the only table maps account key -> open WebSocket connection ids (3 h TTL).
+  No messages are stored: the only table maps account key -> open WebSocket connection ids, plus
+  connection id -> account key so a closed connection can be removed (both 3 h TTL).
 
 Metadata:
   AWSToolsMetrics:
@@ -70,6 +71,9 @@ Resources:
           const ws = new ApiGatewayManagementApiClient({ endpoint: process.env.WS_ENDPOINT });
           const T = process.env.TABLE;
           const KEY = /^[0-9a-f]{32}$/;
+          // Each connection has two items: (key, connection id), and ('#' + connection id, '-') holding the key,
+          // because $disconnect only carries the connection id.
+          const drop = (k, id) => db.send(new DeleteItemCommand({ TableName: T, Key: { ch: { S: k }, id: { S: id } }, ReturnValues: 'ALL_OLD' }));
           const reply = (statusCode, o) => ({ statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(o) });
 
           exports.handler = async (event) => {
@@ -79,8 +83,12 @@ Resources:
               if (rc.routeKey === '$connect') {
                 const k = (event.queryStringParameters || {}).k || '';
                 if (!KEY.test(k)) return { statusCode: 400 };
-                await db.send(new PutItemCommand({ TableName: T, Item: { ch: { S: k }, id: { S: rc.connectionId },
-                  ttl: { N: String(Math.floor(Date.now() / 1000) + 3 * 3600) } } }));
+                const ttl = { N: String(Math.floor(Date.now() / 1000) + 3 * 3600) };
+                await Promise.all([{ ch: { S: k }, id: { S: rc.connectionId }, ttl }, { ch: { S: '#' + rc.connectionId }, id: { S: '-' }, k: { S: k }, ttl }]
+                  .map((Item) => db.send(new PutItemCommand({ TableName: T, Item }))));
+              } else if (rc.routeKey === '$disconnect') {
+                const old = await drop('#' + rc.connectionId, '-');
+                if (old.Attributes?.k) await drop(old.Attributes.k.S, rc.connectionId);
               }
               return { statusCode: 200 };
             }
@@ -93,7 +101,7 @@ Resources:
             if (body.length < 2 || body.length > 512) return reply(400, { error: 'bad request' });
 
             const conns = await db.send(new QueryCommand({ TableName: T, KeyConditionExpression: 'ch = :c',
-              ExpressionAttributeValues: { ':c': { S: m[1] } }, Limit: 4 }));
+              ExpressionAttributeValues: { ':c': { S: m[1] } }, Limit: 25 }));
             let delivered = 0;
             await Promise.all((conns.Items || []).map(async (item) => {
               try {
@@ -101,7 +109,7 @@ Resources:
                 delivered++;
               } catch (e) {
                 if (e.name === 'GoneException' || e.$metadata?.httpStatusCode === 410) {
-                  await db.send(new DeleteItemCommand({ TableName: T, Key: { ch: { S: m[1] }, id: item.id } })).catch(() => {});
+                  await Promise.all([drop(m[1], item.id.S), drop('#' + item.id.S, '-')]).catch(() => {});
                 }
               }
             }));
