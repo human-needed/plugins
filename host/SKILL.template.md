@@ -39,7 +39,7 @@ Per state, keys `<state>.<name>` where state is `needs`, `done`, `working` or `i
 - `light`: `off` | `solid` | `breathe` | `pulse` | `blink` | `heartbeat` | `flicker` | `spin`
 - `brightness`: 0-100
 - `duration`: seconds the light shows this state, 0-3600 (0 = as long as the state lasts)
-- `sound`: `none` | `ding` | `chime` | `rising` | `arpeggio` | `bell` | `beeps` | `bloop`
+- `sound`: `none` | `ding` | `chime` | `rising` | `arpeggio` | `bell` | `beeps` | `bloop` | `bright` | `clock` | `doorbell` | `fanfare` | `ripple` | `call` | `lullaby` | `harp`
 - `volume`: 0-100
 - `repeat`: 1-5 (how many times the sound plays)
 
