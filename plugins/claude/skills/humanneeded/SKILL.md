@@ -1,70 +1,41 @@
 ---
 name: humanneeded
-description: Control the HumanNeeded desk puck (the USB light/chime that shows when Claude is working, done, or needs the user). Use when the user asks to test, mute/unmute, change colours, light modes, durations, brightness, sounds or volume of their puck, or asks whether it is connected.
+description: Control the HumanNeeded desk puck (the USB light/chime that shows when Claude is working, done, or needs the user). Use when the user asks to test the puck, mute or unmute it, change its colours, light modes, durations, brightness, sounds or volume, or asks whether it is connected.
 ---
 
 # HumanNeeded puck
 
-The puck is driven by `${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1`. Run it with:
+The puck is run by the HumanNeeded app on the user's computer. Talk to it with the `hn` command
+(installed by the app, on PATH). Run it with the Bash tool; on Windows, `hn` works from any shell.
 
-```
-powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1" <command> [args]
-```
-
-In a cloud session (Cowork, claude.ai/code) the script can't reach the puck. There, to show
-the user a state, call the puck connector's `set_state` tool if it is available; settings can't
-be changed from a cloud session, so point the user to https://human-needed.com/settings/.
-
-Each command prints the puck's reply: `OK`, `ERR <msg>`, a JSON line, or
-`HumanNeeded puck not found` (unplugged, or another program such as a serial monitor
-or the settings page has its port open).
-
-| User says | Command |
+| User says | Run |
 |---|---|
-| "test my puck" / "is it connected?" | `hello`, then `test needs` |
-| "show me done/working/idle" | `test done` (or `working`, `idle`, `hello`) |
-| "mute for an hour" | `mute 60` (`mute 0` unmutes; sound only, the light still works) |
-| "make needs purple" | `set needs.color #9B5BFF` then `test needs` |
-| "make done blink" | `set done.light blink` then `test done` |
-| "keep green on longer" | `set done.duration 60` (seconds; 0 = as long as the state lasts) |
-| "dimmer" / "brighter" | `get brightness`, then `set brightness <0-100>` |
-| "turn the light off when idle" | `set idle.light off` |
-| "louder alert when it needs me" | `set needs.sound beeps`, `set needs.repeat 3` |
-| "what are my settings?" | `get all` |
-| "the light is stuck" / "clear the puck" | `clear` (forgets all sessions; agents relight it on their next event) |
+| "is my puck connected?" / "what's it doing?" | `hn status` (JSON: app, puck, sessions) |
+| "test my puck" | `hn status`, then `hn test needs` |
+| "show me done/working/idle" | `hn test done` (or `working`, `idle`) |
+| "mute for an hour" | `hn mute 60` (`hn mute 0` unmutes; sound only, the light still works) |
+| "make needs purple" | `hn set needs.color #9B5BFF`, then `hn test needs` |
+| "make done blink" | `hn set done.light blink`, then `hn test done` |
+| "keep green on longer" | `hn set done.duration 10` (seconds, 1-3600) |
+| "dimmer" / "brighter" | `hn set brightness <0-100>` |
+| "turn the light off when idle" | `hn set idle.light off` |
+| "louder alert when it needs me" | `hn set needs.sound beeps`, `hn set needs.repeat 3` |
+| "which version?" | `hn version` |
 
-Settings (saved on the puck). Global masters:
+Settings, `hn set <key> <value>`:
 
-- `brightness`, `volume`: 0-100. Each state's own brightness/volume is a share of these.
+- Global: `brightness`, `volume` (0-100). Each state's own brightness/volume is a share of these.
+- Per state (`needs`, `done`, `working`, `idle`): `<state>.color` `#RRGGBB`; `<state>.light`
+  `off|solid|breathe|pulse|blink|heartbeat|flicker|spin`; `<state>.brightness` 0-100;
+  `<state>.duration` seconds; `<state>.sound` `none|ding|chime|rising|arpeggio|bell|beeps|bloop|bright|clock|doorbell|fanfare|ripple|call|lullaby|harp`;
+  `<state>.volume` 0-100; `<state>.repeat` 1-5. Idle has no sound.
 
-Per state, keys `<state>.<name>` where state is `needs`, `done`, `working` or `idle`:
+Pick a hex value for named colours (purple `#9B5BFF`, red `#FF3B30`, pink `#FF5FA2`,
+teal `#2EC4B6`, white `#FFFFFF`). After a change, run `hn test <state>` so the user sees it.
+For anything else, point the user to the HumanNeeded app's settings window.
 
-- `color`: `#RRGGBB`
-- `light`: `off` | `solid` | `breathe` | `pulse` | `blink` | `heartbeat` | `flicker` | `spin`
-- `brightness`: 0-100
-- `duration`: seconds the light shows this state, 0-3600 (0 = as long as the state lasts)
-- `sound`: `none` | `ding` | `chime` | `rising` | `arpeggio` | `bell` | `beeps` | `bloop` | `bright` | `clock` | `doorbell` | `fanfare` | `ripple` | `call` | `lullaby` | `harp` (the melodies from `bright` on need firmware 0.3.0; `get all` / `hello` show what the puck has)
-- `volume`: 0-100
-- `repeat`: 1-5 (how many times the sound plays)
+If `hn` is not found: the HumanNeeded app isn't installed or this session runs in the cloud.
+Cloud sessions (claude.ai/code, Cowork) can't reach the puck's settings; they still light it
+through the HumanNeeded relay when the user turned on the cloud link in the app.
 
-Idle never plays a sound and has no duration. Pick a sensible hex value for named colours
-(purple `#9B5BFF`, red `#FF3B30`, pink `#FF5FA2`, teal `#2EC4B6`, white `#FFFFFF`).
-After a change, run `test <state>` so the user sees and hears it.
-
-Defaults (firmware 0.3.0): needs `#FFA62B` pulse, call; done `#22E04A` pulse for 3 s, bright;
-working `#3366FF` breathe, silent; idle `#FFD2A0` solid at 20 % brightness.
-For everything at once, point the user to https://human-needed.com/settings/ (Chrome or Edge).
-Setup help and troubleshooting: https://human-needed.com/start/
-
-Don't send `working`/`needs`/`done`/`end` events by hand — the plugin's hooks do that.
-
-## Cloud sessions
-
-Cloud Claude sessions (Cowork, claude.ai/code) reach the puck through the HumanNeeded relay,
-routed by the user's Claude account, so nothing needs setting up.
-
-- A `HumanNeeded desk light:` hook note appears once per session only when states aren't getting
-  through (no computer listening, relay unreachable, or no account id in the session). Mention it
-  only if the user asks about the puck.
-- On the user's computer, `hn.log` lines starting `relay:` show the connection and each state
-  that arrived. "no Claude account in .claude.json" means that computer isn't signed in to Claude.
+Never send `hn event ...` yourself: the plugin's hooks do that.

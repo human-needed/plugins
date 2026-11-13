@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeSubmitPrompt": [
+      {
+        "command": "hn event --agent cursor --state working --stdin-json",
+        "timeout": 5
+      }
+    ],
+    "stop": [
+      {
+        "command": "hn event --agent cursor --state done --stdin-json",
+        "timeout": 5
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "hn event --agent cursor --state end --stdin-json",
+        "timeout": 5
+      }
+    ]
+  }
+}

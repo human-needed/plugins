@@ -4,12 +4,12 @@
     "name": "HumanNeeded",
     "url": "https://human-needed.com"
   },
-  "description": "Plugins that drive the HumanNeeded desk puck.",
+  "description": "Plugins that connect AI coding agents to the HumanNeeded desk puck.",
   "plugins": [
     {
       "name": "humanneeded",
       "source": "./plugins/claude",
-      "description": "Windows (prototype): lights up and chimes the HumanNeeded puck when Claude is working, done, or needs you."
+      "description": "Lights the HumanNeeded puck when Claude is working, done, or needs you (Windows, macOS, Linux; cloud sessions via the relay). Needs the HumanNeeded app."
     }
   ]
 }
