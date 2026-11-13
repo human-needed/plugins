@@ -10,11 +10,6 @@ $plugins = @{
         run   = 'The puck is driven by `${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1`. Run it with:' + $nl + $nl + '```' + $nl +
                 'powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1" <command> [args]' + $nl + '```'
     }
-    'claude-mac' = @{
-        files = 'hn.sh', 'relay.sh', 'hn-mcp.sh', 'hn-mcp.py'
-        run   = 'The puck is driven by `${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh`. Run it with:' + $nl + $nl + '```' + $nl +
-                'bash "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh" <command> [args]' + $nl + '```'
-    }
 }
 foreach ($name in $plugins.Keys) {
     $dir = Join-Path $root "plugins\$name"

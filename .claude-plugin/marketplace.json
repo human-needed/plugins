@@ -9,12 +9,7 @@
     {
       "name": "humanneeded",
       "source": "./plugins/claude",
-      "description": "Windows: lights up and chimes the HumanNeeded puck when Claude is working, done, or needs you."
-    },
-    {
-      "name": "humanneeded-mac",
-      "source": "./plugins/claude-mac",
-      "description": "macOS: lights up and chimes the HumanNeeded puck when Claude is working, done, or needs you. Needs python3 for cloud sessions."
+      "description": "Windows (prototype): lights up and chimes the HumanNeeded puck when Claude is working, done, or needs you."
     }
   ]
 }

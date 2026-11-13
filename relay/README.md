@@ -26,6 +26,5 @@ sh relay/deploy.sh humanneeded us-east-2
 ```
 
 If a redeploy changes the URLs, put `FunctionUrl` (without the trailing slash) into `RELAY_URL`
-in `host/relay.sh`, and `WebSocketUrl` into `$relayWs` in `host/hn-mcp.ps1` and `RELAY_WS` in
-`host/hn-mcp.py`, then run `host/sync-plugins.ps1`. Remove the relay with
+in `host/relay.sh`, and `WebSocketUrl` into `$relayWs` in `host/hn-mcp.ps1`, then run `host/sync-plugins.ps1`. Remove the relay with
 `aws cloudformation delete-stack --stack-name humanneeded-relay --profile humanneeded --region us-east-2`.
