@@ -1,30 +1,58 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  HumanNeeded cloud relay. A cloud Claude session's hook POSTs a puck state to /h/{account key};
-  the relay forwards it unchanged over a WebSocket to the user's PC, which connected with that key.
-  No messages are stored: the only table maps account key -> open WebSocket connection ids (3 h TTL).
+  HumanNeeded relay hn-relay/1 (pm/contracts/relay-api.md). Cloud hooks POST a state to
+  https://relay.human-needed.com/v1/h/{K}; the PC app holds wss://relay-ws.human-needed.com/v1,
+  authenticated with a per-PC secret. Stores bindings and live connection ids only, never states.
+  A 15-minute synthetic probe emails the user when the round trip fails.
 
 Metadata:
   AWSToolsMetrics:
     AWSAgentToolkit: aws-cloudformation@3
 
 Parameters:
-  StageName:
+  CertificateArn:
     Type: String
-    Default: v1
+    Default: ''
+    Description: ACM certificate (us-east-2) for both relay names. Empty = no custom domains yet.
+  PostDomain:
+    Type: String
+    Default: relay.human-needed.com
+  WsDomain:
+    Type: String
+    Default: relay-ws.human-needed.com
+  AlertEmail:
+    Type: String
+    Default: ''
+    Description: Gets probe failures and budget alerts. Empty = no alerts.
+  ProbeSecret:
+    Type: String
+    NoEcho: true
+    AllowedPattern: '^[0-9a-f]{64}$'
+    Description: The probe PC's secret S (64 hex). Generated once by deploy.sh.
+
+Conditions:
+  HasDomains: !Not [!Equals [!Ref CertificateArn, '']]
+  HasEmail: !Not [!Equals [!Ref AlertEmail, '']]
 
 Resources:
-  Connections:
+  # ---------- storage ----------
+  Table:
     Type: AWS::DynamoDB::Table
     Properties:
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
-        - { AttributeName: ch, AttributeType: S }
-        - { AttributeName: id, AttributeType: S }
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
       KeySchema:
-        - { AttributeName: ch, KeyType: HASH }
-        - { AttributeName: id, KeyType: RANGE }
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
       TimeToLiveSpecification: { AttributeName: ttl, Enabled: true }
+      SSESpecification: { SSEEnabled: true }
+
+  # ---------- relay function ----------
+  RelayLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { RetentionInDays: 14 }
 
   RelayRole:
     Type: AWS::IAM::Role
@@ -32,89 +60,83 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal: { Service: lambda.amazonaws.com }
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+          - { Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: sts:AssumeRole }
       Policies:
         - PolicyName: relay
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: [dynamodb:PutItem, dynamodb:DeleteItem, dynamodb:Query]
-                Resource: !GetAtt Connections.Arn
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt RelayLogs.Arn
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:DeleteItem, dynamodb:Query, dynamodb:UpdateItem]
+                Resource: !GetAtt Table.Arn
               - Effect: Allow
                 Action: execute-api:ManageConnections
-                Resource: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${WsApi}/${StageName}/POST/@connections/*
+                Resource: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${WsApi}/v1/*/@connections/*
 
   RelayFunction:
     Type: AWS::Lambda::Function
     Properties:
+      Description: hn-relay/1 POST + WebSocket handler
       Runtime: nodejs22.x
-      Handler: index.handler
+      Architectures: [arm64]
+      Handler: relay.handler
+      Code: src/
       Role: !GetAtt RelayRole.Arn
       Timeout: 5
-      MemorySize: 128
+      MemorySize: 256
+      LoggingConfig: { LogGroup: !Ref RelayLogs }
       Environment:
         Variables:
-          TABLE: !Ref Connections
-          WS_ENDPOINT: !Sub https://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
-      Code:
-        ZipFile: |
-          // HumanNeeded relay (inline: must stay under 4096 characters).
-          const { DynamoDBClient, PutItemCommand, DeleteItemCommand, QueryCommand } = require('@aws-sdk/client-dynamodb');
-          const { ApiGatewayManagementApiClient, PostToConnectionCommand } = require('@aws-sdk/client-apigatewaymanagementapi');
-          const db = new DynamoDBClient({});
-          const ws = new ApiGatewayManagementApiClient({ endpoint: process.env.WS_ENDPOINT });
-          const T = process.env.TABLE;
-          const KEY = /^[0-9a-f]{32}$/;
-          const reply = (statusCode, o) => ({ statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(o) });
+          TABLE: !Ref Table
+          WS_ENDPOINT: !Sub https://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/v1
 
-          exports.handler = async (event) => {
-            const rc = event.requestContext || {};
-            if (rc.connectionId) {
-              // WebSocket API: the PC's connector connects with ?k=<account key>; pings need no answer.
-              if (rc.routeKey === '$connect') {
-                const k = (event.queryStringParameters || {}).k || '';
-                if (!KEY.test(k)) return { statusCode: 400 };
-                await db.send(new PutItemCommand({ TableName: T, Item: { ch: { S: k }, id: { S: rc.connectionId },
-                  ttl: { N: String(Math.floor(Date.now() / 1000) + 3 * 3600) } } }));
-              }
-              return { statusCode: 200 };
-            }
+  # ---------- cloud side: HTTP API ----------
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: hn-relay-v1-post
+      ProtocolType: HTTP
+      DisableExecuteApiEndpoint: false
 
-            // POST /h/{account key} from a cloud session's hook, via the function URL.
-            const m = /^\/h\/([0-9a-f]{32})$/.exec(event.rawPath || '');
-            if (!m || (rc.http || {}).method !== 'POST') return reply(404, { error: 'not found' });
-            let body = event.body || '';
-            if (event.isBase64Encoded) body = Buffer.from(body, 'base64').toString('utf8');
-            if (body.length < 2 || body.length > 512) return reply(400, { error: 'bad request' });
+  HttpIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt RelayFunction.Arn
+      PayloadFormatVersion: '2.0'
 
-            const conns = await db.send(new QueryCommand({ TableName: T, KeyConditionExpression: 'ch = :c',
-              ExpressionAttributeValues: { ':c': { S: m[1] } }, Limit: 4 }));
-            let delivered = 0;
-            await Promise.all((conns.Items || []).map(async (item) => {
-              try {
-                await ws.send(new PostToConnectionCommand({ ConnectionId: item.id.S, Data: Buffer.from(body) }));
-                delivered++;
-              } catch (e) {
-                if (e.name === 'GoneException' || e.$metadata?.httpStatusCode === 410) {
-                  await db.send(new DeleteItemCommand({ TableName: T, Key: { ch: { S: m[1] }, id: item.id } })).catch(() => {});
-                }
-              }
-            }));
-            return reply(202, { delivered });
-          };
+  HttpPostRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties: { ApiId: !Ref HttpApi, RouteKey: 'POST /v1/h/{k}', Target: !Sub 'integrations/${HttpIntegration}' }
 
-  # --- WebSocket API (PC side) ---
+  HttpStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+      # Global cap on the whole POST side (abuse/cost guard). Per-K limits are in the function.
+      DefaultRouteSettings: { ThrottlingBurstLimit: 50, ThrottlingRateLimit: 25 }
+
+  HttpInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RelayFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*/v1/h/*
+
+  # ---------- PC side: WebSocket API ----------
   WsApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
-      Name: humanneeded-relay-ws
+      Name: hn-relay-v1-ws
       ProtocolType: WEBSOCKET
-      RouteSelectionExpression: $request.body.action
+      RouteSelectionExpression: $request.body.t
 
   WsIntegration:
     Type: AWS::ApiGatewayV2::Integration
@@ -142,9 +164,9 @@ Resources:
     Type: AWS::ApiGatewayV2::Stage
     Properties:
       ApiId: !Ref WsApi
-      StageName: !Ref StageName
+      StageName: v1
       DeploymentId: !Ref WsDeployment
-      DefaultRouteSettings: { ThrottlingBurstLimit: 20, ThrottlingRateLimit: 10 }
+      DefaultRouteSettings: { ThrottlingBurstLimit: 50, ThrottlingRateLimit: 25 }
 
   WsInvokePermission:
     Type: AWS::Lambda::Permission
@@ -154,33 +176,176 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${WsApi}/*
 
-  # --- Function URL (cloud session side; Cowork sessions connected to a PC block execute-api hosts) ---
-  RelayUrl:
-    Type: AWS::Lambda::Url
+  # ---------- custom domains (after the ACM certificate is validated) ----------
+  PostDomainName:
+    Type: AWS::ApiGatewayV2::DomainName
+    Condition: HasDomains
     Properties:
-      TargetFunctionArn: !GetAtt RelayFunction.Arn
-      AuthType: NONE
+      DomainName: !Ref PostDomain
+      DomainNameConfigurations:
+        - { CertificateArn: !Ref CertificateArn, EndpointType: REGIONAL, SecurityPolicy: TLS_1_2 }
 
-  UrlInvokePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunctionUrl
-      FunctionName: !Ref RelayFunction
-      FunctionUrlAuthType: NONE
-      Principal: '*'
+  PostMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Condition: HasDomains
+    DependsOn: HttpStage
+    Properties: { DomainName: !Ref PostDomainName, ApiId: !Ref HttpApi, Stage: $default }
 
-  UrlInvokeFunctionPermission:
-    Type: AWS::Lambda::Permission
+  WsDomainName:
+    Type: AWS::ApiGatewayV2::DomainName
+    Condition: HasDomains
     Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !Ref RelayFunction
-      InvokedViaFunctionUrl: true
-      Principal: '*'
+      DomainName: !Ref WsDomain
+      DomainNameConfigurations:
+        - { CertificateArn: !Ref CertificateArn, EndpointType: REGIONAL, SecurityPolicy: TLS_1_2 }
+
+  WsMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Condition: HasDomains
+    DependsOn: WsStage
+    Properties: { DomainName: !Ref WsDomainName, ApiId: !Ref WsApi, Stage: v1, ApiMappingKey: v1 }
+
+  # ---------- synthetic probe ----------
+  ProbeLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { RetentionInDays: 14 }
+
+  ProbeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - { Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: sts:AssumeRole }
+      Policies:
+        - PolicyName: logs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt ProbeLogs.Arn
+
+  ProbeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: hn-relay/1 synthetic probe (POST -> WebSocket round trip)
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      Handler: probe.handler
+      Code: src/
+      Role: !GetAtt ProbeRole.Arn
+      Timeout: 25
+      MemorySize: 256
+      LoggingConfig: { LogGroup: !Ref ProbeLogs }
+      Environment:
+        Variables:
+          PROBE_SECRET: !Ref ProbeSecret
+          PROBE_SEED: !Sub '${AWS::AccountId}/${AWS::StackName}'
+          PROBE_POST_URL: !If [HasDomains, !Sub 'https://${PostDomain}', !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com']
+          PROBE_WS_URL: !If [HasDomains, !Sub 'wss://${WsDomain}/v1', !Sub 'wss://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/v1']
+
+  ProbeNoRetry:
+    Type: AWS::Lambda::EventInvokeConfig
+    Properties: { FunctionName: !Ref ProbeFunction, Qualifier: $LATEST, MaximumRetryAttempts: 0 }
+
+  ProbeSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition: { StringEquals: { 'aws:SourceAccount': !Ref AWS::AccountId } }
+      Policies:
+        - PolicyName: invoke-probe
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - { Effect: Allow, Action: lambda:InvokeFunction, Resource: !GetAtt ProbeFunction.Arn }
+
+  ProbeSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: hn-relay/1 probe every 15 minutes
+      ScheduleExpression: rate(15 minutes)
+      FlexibleTimeWindow: { Mode: 'OFF' }
+      Target:
+        Arn: !GetAtt ProbeFunction.Arn
+        RoleArn: !GetAtt ProbeSchedulerRole.Arn
+        RetryPolicy: { MaximumRetryAttempts: 0 }
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasEmail
+    Properties:
+      KmsMasterKeyId: alias/aws/sns
+      Subscription: [{ Protocol: email, Endpoint: !Ref AlertEmail }]
+
+  AlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Condition: HasEmail
+    Properties:
+      Topics: [!Ref AlertTopic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudwatch.amazonaws.com }
+            Action: sns:Publish
+            Resource: !Ref AlertTopic
+            Condition: { StringEquals: { 'aws:SourceAccount': !Ref AWS::AccountId } }
+
+  # 30-min window holds two probe runs: any error, or no run at all, raises the alarm.
+  ProbeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: HumanNeeded relay probe failed (cloud POST -> PC WebSocket round trip)
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref ProbeFunction }]
+      Statistic: Sum
+      Period: 1800
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: breaching
+      AlarmActions: !If [HasEmail, [!Ref AlertTopic], []]
+      OKActions: !If [HasEmail, [!Ref AlertTopic], []]
+
+  # AWS Budgets is account-wide: alerts at $5 and $20 actual monthly spend.
+  Budget:
+    Type: AWS::Budgets::Budget
+    Condition: HasEmail
+    Properties:
+      Budget:
+        BudgetName: !Sub '${AWS::StackName}-monthly'
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: { Amount: 20, Unit: USD }
+      NotificationsWithSubscribers:
+        - Notification: { NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 25, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref AlertEmail }]
+        - Notification: { NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 100, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref AlertEmail }]
 
 Outputs:
-  FunctionUrl:
-    Description: Cloud hooks POST to <FunctionUrl>h/<account key>
-    Value: !GetAtt RelayUrl.FunctionUrl
+  PostUrl:
+    Description: Cloud hooks POST to <PostUrl>/v1/h/<K>
+    Value: !If [HasDomains, !Sub 'https://${PostDomain}', !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com']
   WebSocketUrl:
-    Description: The PC connects here with ?k=<account key>
-    Value: !Sub wss://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
+    Value: !If [HasDomains, !Sub 'wss://${WsDomain}/v1', !Sub 'wss://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/v1']
+  PostDomainTarget:
+    Condition: HasDomains
+    Description: Cloudflare DNS-only CNAME target for PostDomain
+    Value: !GetAtt PostDomainName.RegionalDomainName
+  WsDomainTarget:
+    Condition: HasDomains
+    Description: Cloudflare DNS-only CNAME target for WsDomain
+    Value: !GetAtt WsDomainName.RegionalDomainName
+  RawPostUrl:
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+  RawWebSocketUrl:
+    Value: !Sub 'wss://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/v1'
