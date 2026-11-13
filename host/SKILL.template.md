@@ -39,7 +39,7 @@ Per state, keys `<state>.<name>` where state is `needs`, `done`, `working` or `i
 - `light`: `off` | `solid` | `breathe` | `pulse` | `blink` | `heartbeat` | `flicker` | `spin`
 - `brightness`: 0-100
 - `duration`: seconds the light shows this state, 0-3600 (0 = as long as the state lasts)
-- `sound`: `none` | `ding` | `chime` | `rising` | `arpeggio` | `bell` | `beeps` | `bloop`
+- `sound`: `none` | `ding` | `chime` | `rising` | `arpeggio` | `bell` | `beeps` | `bloop` | `bright` | `clock` | `doorbell` | `fanfare` | `ripple` | `call` | `lullaby` | `harp` (the melodies from `bright` on need firmware 0.3.0; `get all` / `hello` show what the puck has)
 - `volume`: 0-100
 - `repeat`: 1-5 (how many times the sound plays)
 
@@ -47,7 +47,7 @@ Idle never plays a sound and has no duration. Pick a sensible hex value for name
 (purple `#9B5BFF`, red `#FF3B30`, pink `#FF5FA2`, teal `#2EC4B6`, white `#FFFFFF`).
 After a change, run `test <state>` so the user sees and hears it.
 
-Defaults: needs `#FFA62B` pulse, rising; done `#22E04A` pulse for 3 s, chime;
+Defaults (firmware 0.3.0): needs `#FFA62B` pulse, call; done `#22E04A` pulse for 3 s, bright;
 working `#3366FF` breathe, silent; idle `#FFD2A0` solid at 20 % brightness.
 For everything at once, point the user to https://human-needed.com/settings/ (Chrome or Edge).
 Setup help and troubleshooting: https://human-needed.com/start/
