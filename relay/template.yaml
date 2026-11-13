@@ -203,7 +203,7 @@ Resources:
     Type: AWS::ApiGatewayV2::ApiMapping
     Condition: HasDomains
     DependsOn: WsStage
-    Properties: { DomainName: !Ref WsDomainName, ApiId: !Ref WsApi, Stage: v1, ApiMappingKey: v1 }
+    Properties: { DomainName: !Ref WsDomainName, ApiId: !Ref WsApi, Stage: v1 }
 
   # ---------- synthetic probe ----------
   ProbeLogs:
