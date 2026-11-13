@@ -20,6 +20,7 @@ The puck is run by the HumanNeeded app on the user's computer. Talk to it with t
 | "dimmer" / "brighter" | `hn set brightness <0-100>` |
 | "turn the light off when idle" | `hn set idle.light off` |
 | "louder alert when it needs me" | `hn set needs.sound beeps`, `hn set needs.repeat 3` |
+| "the light is stuck" / "clear the puck" | `hn clear` |
 | "which version?" | `hn version` |
 
 Settings, `hn set <key> <value>`:

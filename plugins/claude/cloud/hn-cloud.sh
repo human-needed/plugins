@@ -19,10 +19,13 @@ RELAY_POST="https://tcxdfuid4msoglniqenx2qhnza0gwwyq.lambda-url.us-east-2.on.aws
 exec >/dev/null 2>&1
 T_START="$(date +%s%3N 2>/dev/null)"
 
-# Test-only overrides (the canary and tests/run.mjs use them).
-[ -n "$HN_RELAY_URL" ] && RELAY_POST="$HN_RELAY_URL"
-HB="${HN_HB_INTERVAL:-45}"
-DIR="${HN_CLOUD_DIR:-/tmp/hn-cloud}"
+# Test-only overrides (tests/run.mjs, the canary), honoured only with HN_DEV=1 (D-045).
+HB=45; DIR=/tmp/hn-cloud
+if [ "$HN_DEV" = "1" ]; then
+  [ -n "$HN_RELAY_URL" ] && RELAY_POST="$HN_RELAY_URL"
+  [ -n "$HN_HB_INTERVAL" ] && HB="$HN_HB_INTERVAL"
+  [ -n "$HN_CLOUD_DIR" ] && DIR="$HN_CLOUD_DIR"
+fi
 mkdir -p "$DIR" 2>/dev/null || exit 0
 
 log() {

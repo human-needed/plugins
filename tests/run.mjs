@@ -183,7 +183,7 @@ writeFileSync(join(home, ".claude.json"), JSON.stringify({ oauthAccount: { accou
 const K = sha("humanneeded-account:" + acct).slice(0, 32);
 const cdir = join(home, "hn-cloud");
 const cenv = { ...process.env, HOME: home, CLAUDE_CODE_REMOTE: "true", HN_RELAY_URL: `http://127.0.0.1:${port}/v1/h/`,
-               HN_HB_INTERVAL: "1", HN_CLOUD_DIR: cdir };
+               HN_HB_INTERVAL: "1", HN_CLOUD_DIR: cdir, HN_DEV: "1" };
 
 // Run the hook like Claude would: `sh hn-cloud.sh <state>` with hook JSON on stdin.
 // Returns {code, stdout, ms}. `parentHold` keeps a parent alive (stands in for the Claude process).
@@ -205,6 +205,18 @@ const h = (sid) => sha(sid).slice(0, 16);
   const r = await runCloud("working", "local-1", { ...cenv, CLAUDE_CODE_REMOTE: "" });
   await sleep(300);
   ok(r.code === 0 && r.out === "" && posts.length === 0, "not in a cloud VM: exits at once, posts nothing", JSON.stringify(r));
+}
+{
+  // Without HN_DEV=1 the test overrides are ignored. No account here, so nothing is sent to the
+  // real relay; the override dir staying empty shows HN_CLOUD_DIR was ignored.
+  const { HN_DEV, ...noDev } = cenv;
+  const noAcct = mkdtempSync(join(tmpdir(), "hn-nodev-"));
+  const odir = join(noAcct, "override");
+  posts.length = 0;
+  const r = await runCloud("done", "s-nodev", { ...noDev, HOME: noAcct, HN_CLOUD_DIR: odir });
+  await sleep(300);
+  ok(r.code === 0 && r.out === "" && posts.length === 0 && !existsSync(odir), "overrides ignored without HN_DEV=1");
+  rmSync(noAcct, { recursive: true, force: true });
 }
 {
   posts.length = 0;
