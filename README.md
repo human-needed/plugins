@@ -1,5 +1,11 @@
 # HumanNeeded plugins
 
+> **Status (2026-11): prototype, being rebuilt.** The plugins below (0.1.x) talk to the puck
+> directly with PowerShell/sh scripts. They are being replaced by thin integrations that call the
+> HumanNeeded app (`hn` command), with a new puck protocol. The 0.1.x plugins and their cloud relay
+> format will not be supported after that. Branch `test` holds the hardened relay experiments
+> (reference only).
+
 Agent plugins for the [HumanNeeded](https://human-needed.com) puck: a USB desk light that glows and
 chimes when your AI coding agent is working, done, or needs you. Setup guide:
 [human-needed.com/start](https://human-needed.com/start/).
