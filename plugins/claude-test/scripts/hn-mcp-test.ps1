@@ -213,6 +213,81 @@ $listener = {
     }
 }
 
+# Watches local chats. Claude runs no hook when the user presses Stop or a chat process dies, so
+# the puck would stay on "working". Claude keeps <config>\sessions\<pid>.json per running chat
+# with "status" busy/idle; when a chat the puck shows as working is idle (or gone), end it there.
+$watcher = {
+    param($hn, $logFile, $logLine, $sessDir, $wmutexName)
+    . ([ScriptBlock]::Create($logLine))
+    function Log([string]$text) { Add-LogLine $logFile ('{0:yyyy-MM-dd HH:mm:ss}  watch: {1}' -f (Get-Date), $text) }
+    $mutex = New-Object Threading.Mutex $false, $wmutexName
+    while ($true) { try { if ($mutex.WaitOne(30000)) { break } } catch [Threading.AbandonedMutexException] { break } }
+    $uuid = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    $seen = @{}; $missing = @{}; $sweepAt = 0; $warned = $false
+    function Read-Chats {
+        $map = @{}
+        foreach ($f in @(Get-ChildItem -LiteralPath $sessDir -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+            try {
+                $d = [IO.File]::ReadAllText($f.FullName) | ConvertFrom-Json
+                if ("$($d.sessionId)" -match $uuid) { $map["$($d.sessionId)"] = @{ status = "$($d.status)"; t = [long]("0$($d.statusUpdatedAt)" -replace '[^0-9]', '') } }
+            } catch {}
+        }
+        $map
+    }
+    function Get-PuckChats {   # claude chats the puck shows as working, from STATUS
+        try {
+            $r = (& $hn status 2>$null | Out-String).Trim()
+            $j = $r | ConvertFrom-Json
+            return @($j.sessions | Where-Object { "$($_.id)" -match $uuid -and "$($_.agent)" -eq 'claude' -and "$($_.state)" -eq 'working' })
+        } catch { return $null }
+    }
+    while ($true) {
+        try {
+            Start-Sleep -Seconds 3
+            if (-not (Test-Path -LiteralPath $sessDir)) { if (-not $warned) { Log "no sessions folder at $sessDir; Stop-button cleanup is off"; $warned = $true }; continue }
+            $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            $chats = Read-Chats
+            $check = $false
+            foreach ($id in $chats.Keys) {
+                $c = $chats[$id]; $prev = $seen[$id]
+                # A chat went idle more than 4 s ago (time for its own "done" hook to land) and
+                # hasn't been checked since: look at the puck.
+                if ($c.status -eq 'idle' -and ($now - $c.t) -gt 4000 -and $prev -ne "idle@$($c.t)") { $check = $true }
+            }
+            foreach ($id in @($seen.Keys)) { if (-not $chats.ContainsKey($id)) { $check = $true } }   # a chat's process ended
+            if ($now -ge $sweepAt) { $check = $true }
+            if (-not $check) { continue }
+            $sweepAt = $now + 60000
+            $lit = Get-PuckChats
+            if ($null -eq $lit) { continue }   # no puck: try again on the next change
+            foreach ($s in $lit) {
+                $id = "$($s.id)"; $age = [int]"0$($s.age_s)"
+                $c = $chats[$id]
+                $why = $null
+                if ($c) {
+                    if ($c.status -eq 'idle' -and ($now - $c.t) -gt 4000) { $why = 'stopped (chat is idle)' }
+                } elseif ($age -gt 20) {
+                    if ($missing[$id]) { $why = 'its Claude process is gone' } else { $missing[$id] = $true }
+                }
+                if ($why) { Log "ended chat $($id.Substring(0, 8)) on the puck: $why"; try { $null = & $hn end claude -SessionId $id 2>&1 } catch {}; $missing.Remove($id) }
+            }
+            $seen = @{}; foreach ($id in $chats.Keys) { $c = $chats[$id]; $seen[$id] = $(if ($c.status -eq 'idle' -and ($now - $c.t) -gt 4000) { "idle@$($c.t)" } else { $c.status }) }
+            if ($missing.Count -gt 200) { $missing.Clear() }
+        } catch { Log "watcher error: $($_.Exception.GetBaseException().Message)"; Start-Sleep -Seconds 5 }
+    }
+}
+
+function Start-Watcher {
+    try {
+        $cfg = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
+        $sessDir = if ($env:HN_TEST_SESSIONS) { $env:HN_TEST_SESSIONS } else { Join-Path $cfg 'sessions' }
+        $ps = [PowerShell]::Create()
+        $null = $ps.AddScript($watcher).AddArgument($hn).AddArgument($logFile).AddArgument($logLine).AddArgument($sessDir).AddArgument($mutexName + 'Watch')
+        $script:watcherHandle = $ps.BeginInvoke()
+        $script:watcherPs = $ps
+    } catch { Write-Log "could not start the chat watcher: $_" }
+}
+
 function Start-Listener {
     try {
         $ps = [PowerShell]::Create()
@@ -224,6 +299,7 @@ function Start-Listener {
 
 Write-Log "started $version (pid $PID, $PSScriptRoot)"
 Start-Listener
+Start-Watcher
 while ($null -ne ($line = [Console]::In.ReadLine())) {
     $line = $line.TrimStart([char]0xFEFF)
     if (-not $line.Trim()) { continue }
