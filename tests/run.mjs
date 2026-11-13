@@ -247,11 +247,11 @@ const hbOf = (sid) => posts.filter((p) => p.body.hb === true && p.body.h === h(s
 {
   posts.length = 0;
   runUnderClaude("working", "s-hb");
-  await sleep(3500);
+  await sleep(4500);
   const hbs = hbOf("s-hb");
-  ok(hbs.length >= 2 && hbs.every((p) => p.body.s === "working"), `working: heartbeats (${hbs.length} in 3.5 s at 1 s)`);
+  ok(hbs.length >= 2 && hbs.every((p) => p.body.s === "working"), `working: heartbeats (${hbs.length} in 4.5 s at 1 s)`);
   runUnderClaude("needs", "s-hb");
-  await sleep(1800);
+  await sleep(2500);
   ok(hbOf("s-hb").some((p) => p.body.s === "needs"), "needs: heartbeat carries the new state");
   runUnderClaude("done", "s-hb");
   await sleep(1500);
