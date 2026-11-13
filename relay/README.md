@@ -1,30 +1,24 @@
-# HumanNeeded cloud relay
+# HumanNeeded cloud relay `hn-relay/1`
 
-Forwards puck states from cloud Claude sessions to the user's computer. One CloudFormation stack
-(`template.yaml`) in the project's Region:
+Spec: `pm/contracts/relay-api.md` (in the AgentAlarm project). One CloudFormation stack, `hn-relay-v1`, us-east-2:
 
-- **Function URL** (what cloud hooks POST to; Cowork sessions connected to a computer can't reach
-  execute-api hosts): `POST /h/{key}` with `{"s","h","u","t","a"}`, response `{"delivered": n}`.
-  key = sha256("humanneeded-account:" + accountUuid)[:32].
-- **WebSocket API** `wss://…/v1?k={key}`: the plugin's connector on the user's computer connects
-  here with its own account's key.
-- **Lambda** (inline in `template.yaml`) forwards each POSTed body unchanged to up to 4
-  connections for that key. The connector accepts only states for its own key that are under
-  5 min old.
-- **DynamoDB** maps key → connection ids (TTL 3 h). No message content is stored.
+- `POST https://relay.human-needed.com/v1/h/<K>` (API Gateway HTTP API) — cloud hooks. Always `202`, empty
+  body; `429` over 10 POSTs per K per 5 s. Invalid bodies are dropped silently.
+- `wss://relay-ws.human-needed.com/v1` (API Gateway WebSocket API) — PC app: `hello` within 5 s, `ping`, `unbind`.
+  Up to 3 installs own a K (30 days after last connect); the relay keeps only `sha256(S)`.
+- One Lambda (`src/relay.mjs`) for both; one DynamoDB table (bindings, live connection ids, rate counters; all TTL).
+- Probe (`src/probe.mjs`) every 15 min: hello + POST + receive through the public names; alarm emails on failure
+  or if it stops running. Budget alerts at $5 and $20. Logs 14 days, never contain keys.
+- DNS (Cloudflare, DNS only): `relay` → `PostDomainTarget`, `relay-ws` → `WsDomainTarget` (stack outputs),
+  plus the two ACM validation CNAMEs.
 
-Anyone who knows an account's key could send that account's puck states or listen for them;
-the key comes from the account id, which isn't published, and a state carries nothing sensitive.
-
-Limits: the Lambda shares the AWS account's concurrency (10 on the free plan), and the WebSocket
-stage is throttled to 10 requests/s (burst 20). Set a spend limit in AWS Settings → Billing.
-
-Deploy (sign in first with `aws login --profile humanneeded`; no keys are kept in this repo):
+Deploy (sign in first with `aws login --profile humanneeded`):
 
 ```bash
-sh relay/deploy.sh humanneeded us-east-2
+sh relay/deploy.sh cert                      # once: ACM cert + its validation records
+HN_CERT_ARN=<arn> HN_ALERT_EMAIL=<email> sh relay/deploy.sh deploy   # later runs keep previous values
+python relay/tests/relay_client.py           # contract test, both sides (pip install websockets)
 ```
 
-If a redeploy changes the URLs, put `FunctionUrl` (without the trailing slash) into `RELAY_URL`
-in `host/relay.sh`, and `WebSocketUrl` into `$relayWs` in `host/hn-mcp.ps1`, then run `host/sync-plugins.ps1`. Remove the relay with
-`aws cloudformation delete-stack --stack-name humanneeded-relay --profile humanneeded --region us-east-2`.
+`deploy.sh` uploads the code zip to the private bucket `hn-relay-artifacts-<account>-us-east-2` (30-day expiry).
+`tests/reach-test.sh` checks from a cloud Claude VM which relay hosts it can reach.
