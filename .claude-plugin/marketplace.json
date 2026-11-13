@@ -19,7 +19,7 @@
     {
       "name": "humanneeded-test",
       "source": "./plugins/claude-test",
-      "description": "TEST BUILD (Windows): local and cloud chats; cloud link by a device key. Not for customers."
+      "description": "TEST BUILD (Windows): local and cloud chats, hardened relay link. Not for customers."
     }
   ]
 }

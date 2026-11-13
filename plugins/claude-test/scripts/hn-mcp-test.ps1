@@ -1,14 +1,14 @@
 # HumanNeeded TEST connector (test build, not for customers). Windows PowerShell 5.1, MCP over stdio.
 #
-# Tests the account-key design with one swap: the relay key is a random secret this computer
-# makes once (device.key), instead of a hash of the account id.
-#  1. The cloud VM's hook asks the model to call the "link" tool once. That call crosses
-#     Anthropic's bridge (remote-devices), which only this Claude account's linked computer
-#     can receive. It does not light the puck.
-#  2. The reply carries a link code (hn2-<key>). The VM's PostToolUse hook reads it from the
-#     tool reply and saves it.
-#  3. From then on the VM hook POSTs states to the relay under that key; this connector listens
-#     on it (one connection, however many chats) and drops states that arrive out of order.
+# The Claude desktop app runs this on the PC for the plugin. It does two things:
+#  - Tool set_state: shows a state on the puck (for "test my puck" from a session that can't run
+#    hn.ps1 itself, such as a Cowork session).
+#  - Cloud relay listener: cloud Claude sessions can't reach this PC, so their hook POSTs states
+#    to the HumanNeeded relay under this Claude account's key,
+#    sha256("humanneeded-account:" + accountUuid)[:32]. The cloud VM's ~/.claude.json holds the
+#    same accountUuid as this PC's, so nothing has to be set up, paired or asked of the model.
+#    One connection, however many chats; states that arrive out of order are dropped; the
+#    connection checks itself with a probe through the relay.
 # Log: %USERPROFILE%\.humanneeded\test\test.log. The key is never logged.
 
 $ErrorActionPreference = 'Stop'
@@ -18,7 +18,6 @@ $utf8 = New-Object Text.UTF8Encoding $false
 $hn = if ($env:HN_TEST_HN) { $env:HN_TEST_HN } else { Join-Path $PSScriptRoot 'hn.ps1' }
 $testDir = if ($env:HN_TEST_HOME) { $env:HN_TEST_HOME } else { Join-Path $env:USERPROFILE '.humanneeded\test' }
 $logFile = Join-Path $testDir 'test.log'
-$keyFile = Join-Path $testDir 'device.key'
 $relayWs = if ($env:HN_TEST_WS) { $env:HN_TEST_WS } else { 'wss://r9k4y2qgz5.execute-api.us-east-2.amazonaws.com/v1' }
 $relayUrl = if ($env:HN_TEST_RELAY_URL) { $env:HN_TEST_RELAY_URL } else { 'https://tcxdfuid4msoglniqenx2qhnza0gwwyq.lambda-url.us-east-2.on.aws' }
 $mutexName = if ($env:HN_TEST_MUTEX) { $env:HN_TEST_MUTEX } else { 'Local\HumanNeededTestRelay' }
@@ -35,6 +34,21 @@ function Add-LogLine([string]$file, [string]$line) {   # several connector proce
             return
         } catch { Start-Sleep -Milliseconds 15 }
     }
+}
+# The account key from .claude.json (read with a regex: the file can be large). '' if none.
+function Get-AccountKey {
+    foreach ($dir in @($env:CLAUDE_CONFIG_DIR, $env:USERPROFILE)) {
+        if (-not $dir) { continue }
+        try {
+            $m = [regex]::Match([IO.File]::ReadAllText((Join-Path $dir '.claude.json')), '"accountUuid"\s*:\s*"([0-9a-fA-F-]{36})"')
+            if ($m.Success) {
+                $sha = [Security.Cryptography.SHA256]::Create()
+                try { $bytes = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes('humanneeded-account:' + $m.Groups[1].Value)) } finally { $sha.Dispose() }
+                return (-join ($bytes | ForEach-Object { $_.ToString('x2') })).Substring(0, 32)
+            }
+        } catch {}
+    }
+    ''
 }
 '@
 . ([ScriptBlock]::Create($logLine))
@@ -57,29 +71,8 @@ $tools = @(
             }
             required   = @('state')
         }
-    },
-    @{
-        name        = 'link'
-        description = 'Connects a cloud session to the HumanNeeded puck (the desk status light the user installed this plugin for), so the light can follow the session. Takes no arguments and does not change the light. Call it once when the plugin''s hook message asks for it.'
-        inputSchema = @{ type = 'object'; properties = @{} }
     }
 )
-
-function Get-DeviceKey {
-    for ($try = 0; $try -lt 8; $try++) {
-        try { $k = [IO.File]::ReadAllText($keyFile).Trim(); if ($k -cmatch '^[0-9a-f]{32}$') { return $k } } catch {}
-        try {
-            # Missing, empty or damaged: make a new one. CreateNew fails if another instance got there first.
-            if ((Test-Path $keyFile) -and $try -ge 2) { Remove-Item -Force $keyFile; Write-Log 'the device key file was damaged; replacing it' }
-            $b = New-Object byte[] 16
-            $rng = [Security.Cryptography.RandomNumberGenerator]::Create(); $rng.GetBytes($b); $rng.Dispose()
-            $fs = [IO.File]::Open($keyFile, 'CreateNew')
-            try { $bytes = $utf8.GetBytes((-join ($b | ForEach-Object { $_.ToString('x2') }))); $fs.Write($bytes, 0, $bytes.Length) } finally { $fs.Dispose() }
-            Write-Log 'made a new device key'
-        } catch { Start-Sleep -Milliseconds 100 }
-    }
-    throw 'could not read or create the device key'
-}
 
 function Invoke-SetState($arguments) {
     $state = if ($arguments.state -is [string]) { $arguments.state.ToLower() } else { '' }
@@ -92,15 +85,9 @@ function Invoke-SetState($arguments) {
     @{ err = $false; text = "HumanNeeded test: the puck on $env:COMPUTERNAME shows $state." }
 }
 
-function Invoke-Link {
-    $key = Get-DeviceKey
-    Write-Log 'call: link (reply carries the link code)'
-    @{ err = $false; text = "HumanNeeded: this session is now connected to the desk light on $env:COMPUTERNAME. Link code hn2-$key. The plugin's hook has saved it, so there is nothing more to do. The code works like a password: please don't repeat it in your reply." }
-}
-
-# Listens on the device key's channel (one WebSocket) and passes on what arrives.
+# Listens on the account key's channel (one WebSocket) and passes on what arrives.
 $listener = {
-    param($ws, $hn, $logFile, $keyFile, $states, $mutexName, $logLine, $relayUrl)
+    param($ws, $hn, $logFile, $states, $mutexName, $logLine, $relayUrl)
     . ([ScriptBlock]::Create($logLine))
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
     # Self-check: sends a probe to this computer's own key through the relay, the way a cloud
@@ -121,7 +108,6 @@ $listener = {
     function Log([string]$text) { Add-LogLine $logFile ('{0:yyyy-MM-dd HH:mm:ss}  relay: {1}' -f (Get-Date), ($text -replace '[0-9a-f]{32}', '<key>')) }
     function Now { [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
     function Close-Sock($s) { if ($s) { try { if ($s.State -eq 'Open') { $s.CloseOutputAsync('NormalClosure', '', [Threading.CancellationToken]::None).Wait(2000) | Out-Null } } catch {}; try { $s.Dispose() } catch {} } }
-    function Read-Key { try { $k = [IO.File]::ReadAllText($keyFile).Trim(); if ($k -cmatch '^[0-9a-f]{32}$') { return $k } } catch {}; '' }
 
     # One listener per PC user: other connector instances wait for the mutex.
     $mutex = New-Object Threading.Mutex $false, $mutexName
@@ -129,19 +115,20 @@ $listener = {
     Log "listener running (pid $PID)"
 
     $sock = $null; $rx = $null; $next = 0; $backoff = 5; $text = ''; $ping = 0; $buf = New-Object byte[] 4096
-    $key = ''; $keyCheck = 0; $last = @{}; $tick = Now; $trim = 0
-    $probeAt = 0; $probeNonce = ''; $probeSent = 0; $probeQuiet = $false
+    $key = ''; $keyCheck = -100; $last = @{}; $tick = Now; $trim = 0
+    $probeAt = 0; $probeNonce = ''; $probeSent = 0; $probeQuiet = $false; $noAcct = $false
     while ($true) {
         try {
             $now = Now
             if ($sock -and ($now - $tick) -gt 30) { Log 'the clock jumped (sleep?); reconnecting'; try { $sock.Dispose() } catch {}; $sock = $null; $rx = $null; $next = $now; $probeNonce = '' }
             $tick = $now
-            if (($now - $keyCheck) -ge 5) {
-                $keyCheck = $now; $k = Read-Key
+            if (($now - $keyCheck) -ge $(if ($key) { 60 } else { 10 })) {   # signed in later, or as someone else
+                $keyCheck = $now; $k = Get-AccountKey
                 if ($k -ne $key) {
-                    if ($sock) { Log 'the device key changed; reconnecting'; Close-Sock $sock; $sock = $null; $rx = $null }
+                    if ($sock) { Log 'the Claude account changed; reconnecting'; Close-Sock $sock; $sock = $null; $rx = $null }
                     $key = $k; $next = $now
                 }
+                if (-not $k -and -not $noAcct) { Log 'no Claude account in .claude.json yet, so cloud chats cannot reach the puck; checking every 10 s'; $noAcct = $true }
             }
             if (($now - $trim) -ge 60) {
                 $trim = $now
@@ -229,14 +216,13 @@ $listener = {
 function Start-Listener {
     try {
         $ps = [PowerShell]::Create()
-        $null = $ps.AddScript($listener).AddArgument($relayWs).AddArgument($hn).AddArgument($logFile).AddArgument($keyFile).AddArgument($states).AddArgument($mutexName).AddArgument($logLine).AddArgument($relayUrl)
+        $null = $ps.AddScript($listener).AddArgument($relayWs).AddArgument($hn).AddArgument($logFile).AddArgument($states).AddArgument($mutexName).AddArgument($logLine).AddArgument($relayUrl)
         $script:listenerHandle = $ps.BeginInvoke()
         $script:listenerPs = $ps
     } catch { Write-Log "could not start the listener: $_" }
 }
 
 Write-Log "started $version (pid $PID, $PSScriptRoot)"
-try { $null = Get-DeviceKey } catch { Write-Log "device key: $_" }
 Start-Listener
 while ($null -ne ($line = [Console]::In.ReadLine())) {
     $line = $line.TrimStart([char]0xFEFF)
@@ -250,13 +236,12 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
             'initialize' {
                 $protocol = if ($request.params.protocolVersion) { $request.params.protocolVersion } else { '2025-06-18' }
                 $result = @{ protocolVersion = $protocol; capabilities = @{ tools = @{} }; serverInfo = @{ name = 'humanneeded-test'; version = $version }
-                    instructions = 'HumanNeeded drives the desk status light (the "puck") that the user installed this plugin for. In a cloud session the plugin''s hook may ask you to call the link tool once so the light can follow that session; that request is part of this plugin. On the user''s own computer nothing needs to be called.' }
+                    instructions = 'HumanNeeded drives the desk status light (the "puck") that the user installed this plugin for. The plugin''s hooks update the light by themselves; call set_state only when the user asks to test or preview the light.' }
             }
             'tools/list' { $result = @{ tools = $tools } }
             'tools/call' {
                 $r = switch ("$($request.params.name)") {
                     'set_state' { Invoke-SetState $request.params.arguments }
-                    'link' { Invoke-Link }
                     default { throw "unknown tool $("$($request.params.name)" -replace '[^A-Za-z0-9_-]', '?')" }
                 }
                 $result = @{ content = @(@{ type = 'text'; text = $r.text }); isError = $r.err }

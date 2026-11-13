@@ -1,23 +1,6 @@
 {
   "description": "HumanNeeded test build: local chats drive the puck directly; cloud chats go through the relay.",
   "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/test.sh",
-              "start",
-              "claude"
-            ],
-            "cloud": "device",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
     "UserPromptSubmit": [
       {
         "hooks": [
@@ -48,7 +31,8 @@
               "claude"
             ],
             "cloud": "device",
-            "timeout": 10
+            "timeout": 5,
+            "async": true
           }
         ]
       }

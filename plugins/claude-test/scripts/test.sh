@@ -2,13 +2,12 @@
 # HumanNeeded TEST cloud hook (test build, not for customers). Does nothing outside a cloud
 # Claude VM (CLAUDE_CODE_REMOTE=true), so local sessions are untouched.
 #
-#   test.sh <start|working|needs|done|end> <agent>     hook JSON on stdin
+#   test.sh <working|needs|done|idle|end> <agent>     hook JSON on stdin
 #
-# Until this VM has the computer's link code, the SessionStart and UserPromptSubmit hooks ask
-# the model to call the puck's "link" tool (a few times at most). The reply to that call, which
-# went over Anthropic's bridge to the user's computer, carries "hn2-<key>"; the PostToolUse hook
-# reads it from the tool reply and saves it in /tmp/hn-test (mode 700). States are then POSTed
-# to the relay under that key, each with a timestamp so the computer can drop late ones.
+# States are POSTed to the HumanNeeded relay under this Claude account's key,
+# sha256("humanneeded-account:" + the accountUuid in ~/.claude.json)[:32]. The user's computer
+# works out the same key from its own .claude.json and listens for it. Each state carries a
+# timestamp so the computer can drop late ones. Prints nothing, so the model isn't involved.
 # Log: /tmp/hn-test/test.log (never contains the key). Always exits 0, within about 4 s.
 
 [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || [ -n "${HN_TEST_SIMULATE:-}" ] || exit 0
@@ -46,33 +45,24 @@ printf '%s' "$h" | grep -Eq '^[0-9a-f]{16}$' || h=0000000000000000
 now="$(date +%s)"; case "$now" in ''|*[!0-9]*) now=0;; esac
 t="$(date +%s%3N 2>/dev/null)"; case "$t" in ''|*[!0-9]*) t="${now}000";; esac
 [ "${#t}" -eq 13 ] || t="${now}000"
-linkf="$dir/link"; askf="$dir/asked"
 
 if [ -f "$dir/test.log" ] && [ "$(wc -c < "$dir/test.log" 2>/dev/null || echo 0)" -gt 200000 ]; then
   tail -n 400 "$dir/test.log" > "$dir/test.log.tmp" 2>/dev/null && mv -f "$dir/test.log.tmp" "$dir/test.log" 2>/dev/null
 fi
 
-# The reply to the puck's link tool carries the link code. Only that tool's reply is trusted.
-if [ "$event" = "PostToolUse" ]; then
-  tool="$(field tool_name | tr -cd 'A-Za-z0-9_.:-' | cut -c1-120)"
-  case "$tool" in
-    *puck__link)
-      code="$(grep -a -o 'hn2-[0-9a-f]\{32\}' "$in" 2>/dev/null | head -n1)"
-      log "chat $h: PostToolUse for $tool: $(wc -c < "$in" | tr -d ' ') bytes, link code $([ -n "$code" ] && echo found || echo NOT FOUND)"
-      if [ -n "$code" ] && [ "${code#hn2-}" != "$(cat "$linkf" 2>/dev/null)" ]; then
-        printf '%s' "${code#hn2-}" > "$in.tmp" && mv -f "$in.tmp" "$linkf" && log "chat $h: LINKED (saved the link code)"
-      fi
-      ;;
-  esac
+cfg="${HN_TEST_CLAUDE_JSON:-$HOME/.claude.json}"
+acct="$(grep -a -o '"accountUuid"[[:space:]]*:[[:space:]]*"[0-9a-fA-F-]\{36\}"' "$cfg" 2>/dev/null | head -n1 | sed 's/"$//; s/.*"//')"
+key=""; why="no Claude account id in .claude.json"
+if [ -n "$acct" ]; then
+  key="$(printf '%s' "humanneeded-account:$acct" | sha256_hex 2>/dev/null | cut -c1-32)"; why="no sha256 tool on this machine"
 fi
-key="$(cat "$linkf" 2>/dev/null)"
 printf '%s' "$key" | grep -Eq '^[0-9a-f]{32}$' || key=""
 
 delivered=""
 case "$state" in
   working|needs|done|idle|end)
     if [ -z "$key" ]; then
-      log "chat $h: $event $state not sent (not linked yet)"
+      log "chat $h: $event $state not sent ($why)"
     elif ! command -v curl >/dev/null 2>&1; then
       log "chat $h: $event $state not sent (no curl on this machine)"
     else
@@ -85,7 +75,7 @@ case "$state" in
         case "$resp" in
           *http=429|*http=502|*http=503) [ "$try" -lt 3 ] || break; try=$((try + 1)); sleep "0.$(( ($$ + try) % 6 + 2 ))" 2>/dev/null || sleep 1;;
           # Nothing listening: the relay may only have tried the computer's old, dead connections
-          # (it clears up to 4 per request), so one more try often gets through.
+          # so one more try often gets through.
           *'"delivered":0'*|*'"delivered": 0'*) [ -z "$again" ] || break; again=1; try=$((try + 1));;
           *) break;;
         esac
@@ -97,30 +87,4 @@ case "$state" in
     ;;
 esac
 
-# Ask the model to make the linking call, on the hooks whose output reaches it. Spaced out, so a
-# session that can't reach the computer isn't nagged: 3 quick tries, then at most one per 30 min
-# for as long as it stays unlinked (the computer may come online later).
-case "$event" in
-  SessionStart|UserPromptSubmit)
-    n=0; lastask=0
-    if [ -f "$askf" ]; then read -r n lastask < "$askf" 2>/dev/null; fi
-    case "$n" in ''|*[!0-9]*) n=0;; ???*) n=99;; esac
-    case "$lastask" in ''|*[!0-9]*|????????????*) lastask=0;; esac
-    want=""
-    if [ -z "$key" ]; then
-      if [ "$n" -lt 3 ] || [ $((now - lastask)) -ge 1800 ]; then want=link; fi
-    elif [ "$event" = "UserPromptSubmit" ] && [ "$delivered" = "0" ] && [ $((now - lastask)) -ge 1800 ]; then
-      want=relink   # linked, but nothing is listening: the computer may have a new key
-    fi
-    if [ -n "$want" ]; then
-      [ "$n" -ge 99 ] || n=$((n + 1)); printf '%s %s\n' "$n" "$now" > "$askf" 2>/dev/null
-      log "chat $h: asked the model to $want (#$n, $event)"
-      if [ "$want" = link ]; then
-        echo "HumanNeeded plugin (the user installed it to drive their desk status light): this cloud session isn't connected to the light yet. Please call the plugin's \"link\" tool once now; its name ends in puck__link and it takes no arguments. It only connects this session to the light. Then continue with the user's request. If that tool isn't available here, just continue."
-      else
-        echo "HumanNeeded plugin (the user installed it to drive their desk status light): this session's connection to the light may be out of date. Please call the plugin's \"link\" tool once more; its name ends in puck__link and it takes no arguments. Then continue with the user's request. If that tool isn't available here, just continue."
-      fi
-    fi
-    ;;
-esac
 exit 0

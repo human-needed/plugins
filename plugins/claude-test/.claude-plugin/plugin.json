@@ -1,7 +1,7 @@
 {
   "name": "humanneeded-test",
-  "version": "0.2.0-test.4",
-  "description": "HumanNeeded test build (Windows): lights the puck for local chats through its USB port and for cloud chats through the relay, using a random key made on this computer and handed to each cloud chat by the link tool.",
+  "version": "0.2.0-test.5",
+  "description": "HumanNeeded test build (Windows): lights the puck for local chats through its USB port and for cloud chats through the relay, with ordered states, retries and a connection self-check.",
   "author": {
     "name": "HumanNeeded"
   }
