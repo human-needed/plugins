@@ -3,20 +3,20 @@
   "hooks": {
     "beforeSubmitPrompt": [
       {
-        "command": "hn event --agent cursor --state working --stdin-json",
-        "timeout": 5
+        "command": "curl -s -o /dev/null --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:24816/v1/event/cursor/working || true",
+        "timeout": 3
       }
     ],
     "stop": [
       {
-        "command": "hn event --agent cursor --state done --stdin-json",
-        "timeout": 5
+        "command": "curl -s -o /dev/null --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:24816/v1/event/cursor/done || true",
+        "timeout": 3
       }
     ],
     "sessionEnd": [
       {
-        "command": "hn event --agent cursor --state end --stdin-json",
-        "timeout": 5
+        "command": "curl -s -o /dev/null --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:24816/v1/event/cursor/end || true",
+        "timeout": 3
       }
     ]
   }

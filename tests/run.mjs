@@ -1,10 +1,8 @@
-// Integration tests (pm/contracts/testing.md §2 "Integrations"): hook files valid, each hook
-// calls `hn` with the right args (fake hn), cloud hook follows hn-relay/1 §4.
+// Integration tests (pm/contracts/testing.md §2 "Integrations"): hook files match app-events §5
+// and D-047 (local HTTP hub on 127.0.0.1:24816), curl hooks reach a stand-in hub, cloud hook
+// follows hn-relay/1 §4.
 //
-//   cargo build --release --manifest-path tests/fake-hn/Cargo.toml
-//   node tests/run.mjs
-//
-// Needs node >= 18, sh, curl (cloud tests). No npm packages.
+//   node tests/run.mjs        (node >= 18, sh, curl; PowerShell on Windows. No npm packages.)
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
@@ -12,12 +10,11 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync
 import { tmpdir } from "node:os";
 import { join, dirname, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
-import { OUTPUTS } from "../tools/gen-hooks.mjs";
+import { OUTPUTS, PORT, eventUrl } from "../tools/gen-hooks.mjs";
+import { startHub } from "./fake-hub.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const isWin = process.platform === "win32";
-const fakeDir = join(root, "tests", "fake-hn", "target", "release");
-const fakeExe = join(fakeDir, isWin ? "hn.exe" : "hn");
 
 let pass = 0, fail = 0;
 const ok = (cond, name, extra = "") => {
@@ -48,116 +45,140 @@ for (const [rel, obj] of Object.entries(OUTPUTS)) {
 }
 
 // Flatten each agent's file to [{event, matcher, hook}]
-function entries(agent) {
-  if (agent === "cursor") {
-    const f = readJson("plugins/cursor/hooks.json");
-    ok(f.version === 1, "cursor: version 1");
-    return Object.entries(f.hooks).flatMap(([ev, list]) => list.map((h) => ({ ev, matcher: h.matcher, h })));
-  }
-  const f = readJson(`plugins/${agent}/hooks/hooks.json`);
-  ok(!("modules" in f) && !("modules" in f.hooks), `${agent}: no "modules" key`);
+function entries(rel) {
+  const f = readJson(rel);
+  ok(!("modules" in f) && !("modules" in f.hooks), `${rel}: no "modules" key`);
+  if (f.version === 1) return Object.entries(f.hooks).flatMap(([ev, list]) => list.map((h) => ({ ev, matcher: h.matcher, h })));
   return Object.entries(f.hooks).flatMap(([ev, groups]) =>
     groups.flatMap((g) => g.hooks.map((h) => ({ ev, matcher: g.matcher, h }))));
 }
-// Which state an entry sends, and the argv it would run
-function call(agent, e) {
-  if (agent === "claude") {
-    if (e.h.command === "hn") return { kind: "hn", argv: e.h.args };
-    if (e.h.command === "sh") return { kind: "cloud", argv: e.h.args };
-    return { kind: "?" };
-  }
-  const argv = e.h.command.split(" ");
-  return argv[0] === "hn" ? { kind: "hn", argv: argv.slice(1), line: e.h.command } : { kind: "?" };
+const URL_RE = /http:\/\/127\.0\.0\.1:24816\/v1\/event\/([a-z0-9-]+)\/(working|needs|done|idle|end)/;
+// What an entry sends: {kind: "http"|"curl"|"cloud", agent, state}
+function what(e) {
+  if (e.h.type === "http") { const m = e.h.url.match(URL_RE); return m && e.h.url === m[0] ? { kind: "http", agent: m[1], state: m[2] } : { kind: "?" }; }
+  if (e.h.command === "sh") return { kind: "cloud", state: e.h.args[1] };
+  const m = (e.h.command ?? "").match(URL_RE);
+  return m ? { kind: "curl", agent: m[1], state: m[2] } : { kind: "?" };
 }
 
+const FILES = { claude: ["plugins/claude/hooks/hooks.json"], codex: ["plugins/codex/hooks.json"],
+                cursor: ["plugins/cursor/hooks.json", "plugins/cursor/hooks.windows.json"] };
 const ALL = {};
-for (const agent of Object.keys(CONTRACT)) {
-  const es = entries(agent);
-  ALL[agent] = es;
-  const got = {};
-  for (const e of es) {
-    const c = call(agent, e);
-    ok(c.kind !== "?", `${agent} ${e.ev}: known command`, JSON.stringify(e.h));
-    if (c.kind !== "hn") continue;
-    const state = c.argv[4];
-    (got[e.ev] ??= []).push(state);
-    ok(eq(c.argv, expectArgs(agent, state)), `${agent} ${e.ev}: hn args`, JSON.stringify(c.argv));
-    const m = MATCHERS[`${agent}:${e.ev}`];
-    if (m) ok(e.matcher === m, `${agent} ${e.ev}: matcher ${m}`, e.matcher);
-    if (agent === "claude") {
-      ok(e.h.async === true && e.h.type === "command" && !("shell" in e.h), `claude ${e.ev}: async exec-form command`);
+for (const [agent, rels] of Object.entries(FILES)) {
+  for (const rel of rels) {
+    const es = entries(rel);
+    ALL[rel] = es;
+    const got = {};
+    if (agent === "cursor") ok(readJson(rel).version === 1, `${rel}: version 1`);
+    for (const e of es) {
+      const w = what(e);
+      ok(w.kind !== "?", `${rel} ${e.ev}: known hook`, JSON.stringify(e.h));
+      if (w.kind === "cloud" || w.kind === "?") continue;
+      ok(w.agent === agent, `${rel} ${e.ev}: agent ${agent}`);
+      if (!(got[e.ev] ??= []).includes(w.state)) got[e.ev].push(w.state);
+      const m = MATCHERS[`${agent}:${e.ev}`];
+      if (m) ok(e.matcher === m, `${agent} ${e.ev}: matcher ${m}`, e.matcher);
+      if (w.kind === "http") ok(e.h.timeout === 1 && !("headers" in e.h), `${rel} ${e.ev}: http hook, timeout 1 s`);
+      if (w.kind === "curl") {
+        const cmds = [e.h.command, e.h.commandWindows].filter(Boolean);
+        for (const c of cmds) {
+          const win = c.startsWith("$input | curl.exe ");
+          ok(win ? c.endsWith("; exit 0") : c.startsWith("curl ") && c.endsWith(" || true"), `${rel} ${e.ev}: curl ${win ? "windows" : "posix"} form, exit 0`);
+          ok(c.includes("--noproxy '*'") && c.includes("-H 'Content-Type: application/json'") && c.includes(" -s ") &&
+             c.includes(win ? "-o NUL" : "-o /dev/null") && c.includes(win ? "--data-binary '@-'" : "--data-binary @-") &&
+             c.match(URL_RE)[0] === eventUrl(agent, w.state), `${rel} ${e.ev}: curl options`);
+        }
+        if (agent === "codex") {
+          ok(e.h.command && e.h.commandWindows?.startsWith("$input | curl.exe "), `codex ${e.ev}: command + commandWindows`);
+          ok(e.ev === "SessionEnd" ? !e.h.async && e.h.timeout <= 3 : e.h.async === true, `codex ${e.ev}: async (SessionEnd sync, <= 3 s)`);
+        }
+        if (agent === "cursor") ok(rel.endsWith("windows.json") === e.h.command.startsWith("$input"), `${rel} ${e.ev}: OS form`);
+      }
     }
-    if (agent === "codex") {
-      ok(e.ev === "SessionEnd" ? !e.h.async && e.h.timeout <= 3 : e.h.async === true,
-         `codex ${e.ev}: async (SessionEnd sync, timeout <= 3 s)`);
-    }
+    ok(eq(got, CONTRACT[agent]), `${rel}: mapping equals app-events §5`, JSON.stringify(got));
   }
-  ok(eq(got, CONTRACT[agent]), `${agent}: mapping equals app-events §5`, JSON.stringify(got));
 }
-// Claude: every event also has the cloud hook, same state, never offered to device hooks
-for (const e of ALL.claude) {
-  const c = call("claude", e);
-  if (c.kind !== "cloud") continue;
-  ok(c.argv[0] === "${CLAUDE_PLUGIN_ROOT}/cloud/hn-cloud.sh" && CONTRACT.claude[e.ev]?.[0] === c.argv[1] &&
-     e.h.async === true && e.h.cloud === "skip", `claude ${e.ev}: cloud hook -> ${c.argv[1]}`);
+for (const e of ALL["plugins/claude/hooks/hooks.json"]) {
+  const w = what(e);
+  if (w.kind !== "cloud") continue;
+  ok(e.h.args[0] === "${CLAUDE_PLUGIN_ROOT}/cloud/hn-cloud.sh" && CONTRACT.claude[e.ev]?.[0] === w.state &&
+     e.h.async === true && e.h.cloud === "skip", `claude ${e.ev}: cloud hook -> ${w.state}`);
 }
-ok(ALL.claude.filter((e) => call("claude", e).kind === "cloud").length === Object.keys(CONTRACT.claude).length,
+ok(ALL["plugins/claude/hooks/hooks.json"].filter((e) => what(e).kind === "cloud").length === Object.keys(CONTRACT.claude).length,
    "claude: one cloud hook per event");
 
 const plugin = readJson("plugins/claude/.claude-plugin/plugin.json");
 ok(plugin.name === "humanneeded" && /^2\./.test(plugin.version), "claude plugin.json name/version 2.x");
 const mkt = readJson(".claude-plugin/marketplace.json");
 ok(mkt.plugins.length === 1 && mkt.plugins[0].source === "./plugins/claude", "marketplace lists one Claude plugin");
-const codexPlugin = readJson("plugins/codex/.codex-plugin/plugin.json");
-ok(codexPlugin.name === "humanneeded", "codex plugin.json");
 const manifest = readJson("integrations/manifest.json");
 ok(eq(Object.keys(manifest.agents).sort(), ["claude", "codex", "cursor"]), "integrations/manifest.json has 3 agents");
 
 // ---------------------------------------------------------------------------------------------
-console.log("2. hooks run the fake hn");
-if (!existsSync(fakeExe)) {
-  ok(false, "fake hn built", `missing ${fakeExe}; run cargo build --release --manifest-path tests/fake-hn/Cargo.toml`);
-} else {
-  const work = mkdtempSync(join(tmpdir(), "hn-test-"));
-  const log = join(work, "calls.jsonl");
-  const env = { ...process.env, PATH: fakeDir + delimiter + process.env.PATH, HN_FAKE_LOG: log,
-                CLAUDE_PLUGIN_ROOT: join(root, "plugins", "claude") };
-  delete env.CLAUDE_CODE_REMOTE;
-  const payload = (agent, ev, i) => agent === "cursor"
-    ? { conversation_id: `conv-${i}`, generation_id: "g1", hook_event_name: ev, cursor_version: "test" }
-    : { session_id: `sess-${agent}-${i}`, hook_event_name: ev, cwd: work, transcript_path: null };
-  let i = 0;
-  for (const agent of Object.keys(CONTRACT)) {
-    for (const e of ALL[agent]) {
-      const c = call(agent, e);
-      i++;
-      const input = JSON.stringify(payload(agent, e.ev, i));
-      let r;
-      if (agent === "claude") {
-        // Claude Code exec form: command resolved on PATH, no shell; ${CLAUDE_PLUGIN_ROOT} substituted.
-        const argv = c.argv.map((a) => a.replaceAll("${CLAUDE_PLUGIN_ROOT}", env.CLAUDE_PLUGIN_ROOT));
-        r = spawnSync(e.h.command, argv, { input, env, timeout: 10000 });
-      } else {
-        // Codex and Cursor run a shell string (PowerShell for Cursor on Windows).
-        const sh = isWin && agent === "cursor" ? "powershell.exe" : true;
-        r = spawnSync(c.line, { input, env, shell: sh, timeout: 10000 });
+console.log("2. curl hooks against a stand-in hub (Codex, Cursor)");
+{
+  const recs = [];
+  const hub = await startHub({ port: PORT, onRequest: (r) => recs.push(r) });
+  // Run a hook command like the agent does: sh -c on macOS/Linux, PowerShell on Windows.
+  const runHook = (cmd, input, env = process.env) => new Promise((res) => {
+    const t = Date.now();
+    const p = isWin && cmd.startsWith("$input")
+      ? spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", cmd], { env })
+      : spawn("sh", ["-c", cmd], { env });
+    let out = "";
+    p.stdout.on("data", (d) => (out += d));
+    p.stderr.on("data", (d) => (out += d));
+    p.on("close", (code) => res({ code, out, ms: Date.now() - t }));
+    p.stdin.on("error", () => {});
+    p.stdin.end(input);
+  });
+  const deadProxy = { ...process.env, HTTP_PROXY: "http://127.0.0.1:9", HTTPS_PROXY: "http://127.0.0.1:9",
+                      http_proxy: "http://127.0.0.1:9", ALL_PROXY: "http://127.0.0.1:9", NO_PROXY: "" };
+  const forms = [];
+  for (const rel of ["plugins/codex/hooks.json", "plugins/cursor/hooks.json", "plugins/cursor/hooks.windows.json"]) {
+    for (const e of ALL[rel]) {
+      for (const cmd of [e.h.command, e.h.commandWindows].filter(Boolean)) {
+        const win = cmd.startsWith("$input");
+        if (win && !isWin) continue;                    // PowerShell forms on Windows only; sh forms everywhere
+        forms.push({ rel, e, cmd });
       }
-      const what = `${agent} ${e.ev} ${c.kind}`;
-      ok(r.status === 0, `${what}: exit 0`, String(r.error || r.stderr));
-      ok((r.stdout?.length ?? 0) === 0, `${what}: prints nothing`, String(r.stdout));
-      if (c.kind !== "hn") continue;
-      const calls = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l)) : [];
-      const last = calls[calls.length - 1];
-      ok(last && eq(last.args, c.argv) && JSON.parse(last.stdin).hook_event_name === e.ev &&
-         (JSON.parse(last.stdin).session_id ?? JSON.parse(last.stdin).conversation_id) ===
-           (payload(agent, e.ev, i).session_id ?? `conv-${i}`),
-         `${what}: fake hn got args + stdin JSON`, JSON.stringify(last));
     }
   }
-  const calls = readFileSync(log, "utf8").trim().split("\n");
-  const hnHooks = Object.values(ALL).flat().filter((e) => (e.h.command === "hn" || e.h.command.startsWith("hn ")));
-  ok(calls.length === hnHooks.length, `cloud hooks made no hn calls (${calls.length} calls / ${hnHooks.length} hn hooks)`);
-  rmSync(work, { recursive: true, force: true });
+  let i = 0;
+  for (const { rel, e, cmd } of forms) {
+    const w = what(e);
+    const sid = `s-${++i}`;
+    const input = JSON.stringify(w.agent === "cursor" ? { conversation_id: sid, hook_event_name: e.ev } : { session_id: sid, hook_event_name: e.ev });
+    const n = recs.length;
+    const r = await runHook(cmd, input, deadProxy);
+    const rec = recs[n];
+    ok(r.code === 0 && r.out === "", `${rel} ${e.ev}: exit 0, prints nothing (${r.ms} ms)`, JSON.stringify(r));
+    ok(recs.length === n + 1 && rec.method === "POST" && rec.path === `/v1/event/${w.agent}/${w.state}` &&
+       rec.headers["content-type"] === "application/json" && rec.headers.host === `127.0.0.1:${PORT}` &&
+       !rec.headers.origin && JSON.parse(rec.body)[w.agent === "cursor" ? "conversation_id" : "session_id"] === sid,
+       `${rel} ${e.ev}: POST /v1/event/${w.agent}/${w.state} with the hook JSON, past a dead proxy`, JSON.stringify(rec));
+  }
+  ok(forms.length > 0, `${forms.length} curl hook forms run on this OS`);
+  {
+    const { cmd } = forms[0];
+    const big = JSON.stringify({ session_id: "big", tool_response: "x".repeat(8 << 20) });
+    const n = recs.length;
+    const r = await runHook(cmd, big);
+    ok(r.code === 0 && r.out === "" && recs[n]?.bytes === big.length + (cmd.startsWith("$input") ? 2 : 0) && r.ms < 3000,
+       `8 MB hook input sent in ${r.ms} ms`, `${recs[n]?.bytes}`);
+  }
+  await new Promise((r) => hub.close(r));
+  for (const { rel, e, cmd } of forms.slice(0, 3)) {
+    const r = await runHook(cmd, '{"session_id":"down"}');
+    ok(r.code === 0 && r.out === "" && r.ms < 2500, `${rel} ${e.ev}: app closed -> exit 0, silent, ${r.ms} ms`);
+  }
+  // A hung app: the hook gives up within curl's 1.5 s limit (+ shell start).
+  const hung = createServer(() => {});
+  await new Promise((r) => hung.listen(PORT, "127.0.0.1", r));
+  const r = await runHook(forms[0].cmd, '{"session_id":"hung"}');
+  ok(r.code === 0 && r.out === "" && r.ms < 3000, `app hung -> exit 0, silent, ${r.ms} ms`);
+  hung.closeAllConnections?.();
+  await new Promise((res) => hung.close(res));
 }
 
 // ---------------------------------------------------------------------------------------------

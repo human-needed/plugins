@@ -11,6 +11,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: cargo build --release --manifest-path tests/fake-hn/Cargo.toml
       - run: node tests/run.mjs
         shell: bash

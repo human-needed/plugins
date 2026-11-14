@@ -1,22 +1,13 @@
 {
-  "description": "HumanNeeded: reports Claude's state to the HumanNeeded app (hn) or, in cloud sessions, to the relay.",
+  "description": "HumanNeeded: reports Claude's state to the HumanNeeded app (local HTTP) or, in cloud sessions, to the relay.",
   "hooks": {
     "UserPromptSubmit": [
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "hn",
-            "args": [
-              "event",
-              "--agent",
-              "claude",
-              "--state",
-              "working",
-              "--stdin-json"
-            ],
-            "async": true,
-            "timeout": 5
+            "type": "http",
+            "url": "http://127.0.0.1:24816/v1/event/claude/working",
+            "timeout": 1
           },
           {
             "type": "command",
@@ -37,18 +28,9 @@
         "matcher": "*",
         "hooks": [
           {
-            "type": "command",
-            "command": "hn",
-            "args": [
-              "event",
-              "--agent",
-              "claude",
-              "--state",
-              "working",
-              "--stdin-json"
-            ],
-            "async": true,
-            "timeout": 5
+            "type": "http",
+            "url": "http://127.0.0.1:24816/v1/event/claude/working",
+            "timeout": 1
           },
           {
             "type": "command",
@@ -69,18 +51,9 @@
         "matcher": "permission_prompt|idle_prompt",
         "hooks": [
           {
-            "type": "command",
-            "command": "hn",
-            "args": [
-              "event",
-              "--agent",
-              "claude",
-              "--state",
-              "needs",
-              "--stdin-json"
-            ],
-            "async": true,
-            "timeout": 5
+            "type": "http",
+            "url": "http://127.0.0.1:24816/v1/event/claude/needs",
+            "timeout": 1
           },
           {
             "type": "command",
@@ -101,18 +74,9 @@
         "matcher": "*",
         "hooks": [
           {
-            "type": "command",
-            "command": "hn",
-            "args": [
-              "event",
-              "--agent",
-              "claude",
-              "--state",
-              "needs",
-              "--stdin-json"
-            ],
-            "async": true,
-            "timeout": 5
+            "type": "http",
+            "url": "http://127.0.0.1:24816/v1/event/claude/needs",
+            "timeout": 1
           },
           {
             "type": "command",
@@ -133,18 +97,9 @@
         "matcher": "AskUserQuestion",
         "hooks": [
           {
-            "type": "command",
-            "command": "hn",
-            "args": [
-              "event",
-              "--agent",
-              "claude",
-              "--state",
-              "needs",
-              "--stdin-json"
-            ],
-            "async": true,
-            "timeout": 5
+            "type": "http",
+            "url": "http://127.0.0.1:24816/v1/event/claude/needs",
+            "timeout": 1
           },
           {
             "type": "command",
@@ -164,18 +119,9 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "hn",
-            "args": [
-              "event",
-              "--agent",
-              "claude",
-              "--state",
-              "done",
-              "--stdin-json"
-            ],
-            "async": true,
-            "timeout": 5
+            "type": "http",
+            "url": "http://127.0.0.1:24816/v1/event/claude/done",
+            "timeout": 1
           },
           {
             "type": "command",
@@ -195,18 +141,9 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "hn",
-            "args": [
-              "event",
-              "--agent",
-              "claude",
-              "--state",
-              "end",
-              "--stdin-json"
-            ],
-            "async": true,
-            "timeout": 5
+            "type": "http",
+            "url": "http://127.0.0.1:24816/v1/event/claude/end",
+            "timeout": 1
           },
           {
             "type": "command",

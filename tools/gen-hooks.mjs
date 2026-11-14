@@ -1,12 +1,17 @@
 // Generates every agent's hook file from one mapping (pm/contracts/app-events.md §5).
 // Run: node tools/gen-hooks.mjs   (tests fail if the committed files differ from its output)
+//
+// D-047: the HumanNeeded app is a local HTTP hub. Every event is
+//   POST http://127.0.0.1:24816/v1/event/<agent>/<state>   body = the agent's hook JSON
+// Claude uses native HTTP hooks; Codex and Cursor pipe stdin into the OS's built-in curl.
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const hnArgs = (agent, state) => ["event", "--agent", agent, "--state", state, "--stdin-json"];
-const hnLine = (agent, state) => ["hn", ...hnArgs(agent, state)].join(" ");
+
+export const PORT = 24816;
+export const eventUrl = (agent, state) => `http://127.0.0.1:${PORT}/v1/event/${agent}/${state}`;
 
 // [event, matcher or null, state]
 export const MAPPING = {
@@ -33,51 +38,67 @@ export const MAPPING = {
   ],
 };
 
-// Claude Code: exec form (no shell on the PC). Second entry runs only in cloud VMs
-// (cloud/hn-cloud.sh exits at once unless CLAUDE_CODE_REMOTE=true).
+// curl: silent, no output, ≤ 1.5 s (0.3 s connect: Windows takes ~1-2 s to refuse a closed
+// loopback port), never through a proxy, always exit 0.
+const CURL_OPTS = "-s -o {NULL} --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'Content-Type: application/json' --data-binary {AT}";
+// macOS/Linux: sh -c. curl reads the hook JSON from stdin itself.
+export const curlPosix = (agent, state) =>
+  `curl ${CURL_OPTS.replace("{NULL}", "/dev/null").replace("{AT}", "@-")} ${eventUrl(agent, state)} || true`;
+// Windows: PowerShell (Cursor documented; Codex: "command hooks require PowerShell on Windows").
+// curl.exe, not curl (an Invoke-WebRequest alias in Windows PowerShell); stdin arrives as $input.
+export const curlWindows = (agent, state) =>
+  `$input | curl.exe ${CURL_OPTS.replace("{NULL}", "NUL").replace("{AT}", "'@-'")} ${eventUrl(agent, state)}; exit 0`;
+
+// Claude Code: native HTTP hooks (no process at all on the PC). HTTP hooks are always
+// synchronous in Claude Code (async is ignored), so keep the timeout at 1 s; the app must
+// answer at once. The second entry runs only in cloud VMs (cloud/hn-cloud.sh exits at once
+// unless CLAUDE_CODE_REMOTE=true); the HTTP hook in a VM hits nothing and fails in ms.
 function claude() {
   const hooks = {};
   for (const [ev, matcher, state] of MAPPING.claude) {
     const group = {};
     if (matcher) group.matcher = matcher;
     group.hooks = [
-      { type: "command", command: "hn", args: hnArgs("claude", state), async: true, timeout: 5 },
+      { type: "http", url: eventUrl("claude", state), timeout: 1 },
       { type: "command", command: "sh", args: ["${CLAUDE_PLUGIN_ROOT}/cloud/hn-cloud.sh", state],
         async: true, timeout: 5, cloud: "skip" },
     ];
     (hooks[ev] ??= []).push(group);
   }
-  return { description: "HumanNeeded: reports Claude's state to the HumanNeeded app (hn) or, in cloud sessions, to the relay.", hooks };
+  return { description: "HumanNeeded: reports Claude's state to the HumanNeeded app (local HTTP) or, in cloud sessions, to the relay.", hooks };
 }
 
-// Codex: shell string (Codex has no exec form). SessionEnd is always synchronous in Codex
-// (max 3 s), so no async there.
+// Codex: ~/.codex/hooks.json. `command` for macOS/Linux, `commandWindows` for Windows.
+// SessionEnd is always synchronous in Codex (max 3 s), so no async there.
 function codex() {
   const hooks = {};
   for (const [ev, matcher, state] of MAPPING.codex) {
-    const h = { type: "command", command: hnLine("codex", state), timeout: ev === "SessionEnd" ? 2 : 5 };
+    const h = { type: "command", command: curlPosix("codex", state), commandWindows: curlWindows("codex", state),
+                timeout: 3 };
     if (ev !== "SessionEnd") h.async = true;
     const group = {};
     if (matcher) group.matcher = matcher;
     group.hooks = [h];
     (hooks[ev] ??= []).push(group);
   }
-  return { description: "HumanNeeded: reports Codex's state to the HumanNeeded app (hn).", hooks };
+  return { description: "HumanNeeded: reports Codex's state to the HumanNeeded app (local HTTP).", hooks };
 }
 
-// Cursor: ~/.cursor/hooks.json format (version 1, flat entries).
-function cursor() {
+// Cursor: ~/.cursor/hooks.json (version 1). No per-OS field, so one file per OS family.
+function cursor(os) {
   const hooks = {};
   for (const [ev, , state] of MAPPING.cursor) {
-    (hooks[ev] ??= []).push({ command: hnLine("cursor", state), timeout: 5 });
+    const command = os === "windows" ? curlWindows("cursor", state) : curlPosix("cursor", state);
+    (hooks[ev] ??= []).push({ command, timeout: 3 });
   }
   return { version: 1, hooks };
 }
 
 export const OUTPUTS = {
   "plugins/claude/hooks/hooks.json": claude(),
-  "plugins/codex/hooks/hooks.json": codex(),
-  "plugins/cursor/hooks.json": cursor(),
+  "plugins/codex/hooks.json": codex(),
+  "plugins/cursor/hooks.json": cursor("posix"),
+  "plugins/cursor/hooks.windows.json": cursor("windows"),
 };
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
