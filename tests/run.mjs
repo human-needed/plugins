@@ -82,17 +82,17 @@ for (const [agent, rels] of Object.entries(FILES)) {
       if (w.kind === "curl") {
         const cmds = [e.h.command, e.h.commandWindows].filter(Boolean);
         for (const c of cmds) {
-          const win = c.startsWith("$input | curl.exe ");
+          const win = c.startsWith("curl.exe ");
           ok(win ? c.endsWith("; exit 0") : c.startsWith("curl ") && c.endsWith(" || true"), `${rel} ${e.ev}: curl ${win ? "windows" : "posix"} form, exit 0`);
           ok(c.includes("--noproxy '*'") && c.includes("-H 'Content-Type: application/json'") && c.includes(" -s ") &&
              c.includes(win ? "-o NUL" : "-o /dev/null") && c.includes(win ? "--data-binary '@-'" : "--data-binary @-") &&
              c.match(URL_RE)[0] === eventUrl(agent, w.state), `${rel} ${e.ev}: curl options`);
         }
         if (agent === "codex") {
-          ok(e.h.command && e.h.commandWindows?.startsWith("$input | curl.exe "), `codex ${e.ev}: command + commandWindows`);
+          ok(e.h.command && e.h.commandWindows?.startsWith("curl.exe "), `codex ${e.ev}: command + commandWindows`);
           ok(e.ev === "SessionEnd" ? !e.h.async && e.h.timeout <= 3 : e.h.async === true, `codex ${e.ev}: async (SessionEnd sync, <= 3 s)`);
         }
-        if (agent === "cursor") ok(rel.endsWith("windows.json") === e.h.command.startsWith("$input"), `${rel} ${e.ev}: OS form`);
+        if (agent === "cursor") ok(rel.endsWith("windows.json") === e.h.command.startsWith("curl.exe "), `${rel} ${e.ev}: OS form`);
       }
     }
     ok(eq(got, CONTRACT[agent]), `${rel}: mapping equals app-events §5`, JSON.stringify(got));
@@ -122,7 +122,7 @@ console.log("2. curl hooks against a stand-in hub (Codex, Cursor)");
   // Run a hook command like the agent does: sh -c on macOS/Linux, PowerShell on Windows.
   const runHook = (cmd, input, env = process.env) => new Promise((res) => {
     const t = Date.now();
-    const p = isWin && cmd.startsWith("$input")
+    const p = isWin && cmd.includes("curl.exe ")
       ? spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", cmd], { env })
       : spawn("sh", ["-c", cmd], { env });
     let out = "";
@@ -138,7 +138,7 @@ console.log("2. curl hooks against a stand-in hub (Codex, Cursor)");
   for (const rel of ["plugins/codex/hooks.json", "plugins/cursor/hooks.json", "plugins/cursor/hooks.windows.json"]) {
     for (const e of ALL[rel]) {
       for (const cmd of [e.h.command, e.h.commandWindows].filter(Boolean)) {
-        const win = cmd.startsWith("$input");
+        const win = cmd.startsWith("curl.exe ");
         if (win && !isWin) continue;                    // PowerShell forms on Windows only; sh forms everywhere
         forms.push({ rel, e, cmd });
       }
@@ -148,15 +148,25 @@ console.log("2. curl hooks against a stand-in hub (Codex, Cursor)");
   for (const { rel, e, cmd } of forms) {
     const w = what(e);
     const sid = `s-${++i}`;
-    const input = JSON.stringify(w.agent === "cursor" ? { conversation_id: sid, hook_event_name: e.ev } : { session_id: sid, hook_event_name: e.ev });
+    // Non-ASCII on purpose: the app must get the hook's bytes exactly (no BOM, no CRLF, no re-encoding).
+    const input = JSON.stringify({ [w.agent === "cursor" ? "conversation_id" : "session_id"]: sid, hook_event_name: e.ev, prompt: "é 日本 ✓" });
     const n = recs.length;
     const r = await runHook(cmd, input, deadProxy);
     const rec = recs[n];
     ok(r.code === 0 && r.out === "", `${rel} ${e.ev}: exit 0, prints nothing (${r.ms} ms)`, JSON.stringify(r));
     ok(recs.length === n + 1 && rec.method === "POST" && rec.path === `/v1/event/${w.agent}/${w.state}` &&
        rec.headers["content-type"] === "application/json" && rec.headers.host === `127.0.0.1:${PORT}` &&
-       !rec.headers.origin && JSON.parse(rec.body)[w.agent === "cursor" ? "conversation_id" : "session_id"] === sid,
-       `${rel} ${e.ev}: POST /v1/event/${w.agent}/${w.state} with the hook JSON, past a dead proxy`, JSON.stringify(rec));
+       !rec.headers.origin && rec.body === input && rec.bytes === Buffer.byteLength(input),
+       `${rel} ${e.ev}: POST /v1/event/${w.agent}/${w.state} with the exact hook bytes, past a dead proxy`, JSON.stringify(rec));
+  }
+  // Windows: a PowerShell profile or host that sets $OutputEncoding to UTF-8 (with BOM) must not
+  // change what is sent (it did with `$input | curl.exe`: CI run 43658194923).
+  for (const { rel, e, cmd } of forms.filter((f) => isWin && f.cmd.startsWith("curl.exe ")).slice(0, 1)) {
+    const input = JSON.stringify({ session_id: "bom", prompt: "é 日本" });
+    const n = recs.length;
+    const r = await runHook("$OutputEncoding = [Text.Encoding]::UTF8; " + cmd, input);
+    ok(r.code === 0 && recs[n]?.body === input && recs[n]?.bytes === Buffer.byteLength(input),
+       `${rel} ${e.ev}: UTF-8 $OutputEncoding profile -> exact bytes, no BOM`, JSON.stringify(recs[n]));
   }
   ok(forms.length > 0, `${forms.length} curl hook forms run on this OS`);
   {
@@ -164,7 +174,7 @@ console.log("2. curl hooks against a stand-in hub (Codex, Cursor)");
     const big = JSON.stringify({ session_id: "big", tool_response: "x".repeat(8 << 20) });
     const n = recs.length;
     const r = await runHook(cmd, big);
-    ok(r.code === 0 && r.out === "" && recs[n]?.bytes === big.length + (cmd.startsWith("$input") ? 2 : 0) && r.ms < 3000,
+    ok(r.code === 0 && r.out === "" && recs[n]?.bytes === big.length && r.ms < 3000,
        `8 MB hook input sent in ${r.ms} ms`, `${recs[n]?.bytes}`);
   }
   await new Promise((r) => hub.close(r));

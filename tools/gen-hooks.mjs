@@ -45,9 +45,11 @@ const CURL_OPTS = "-s -o {NULL} --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'C
 export const curlPosix = (agent, state) =>
   `curl ${CURL_OPTS.replace("{NULL}", "/dev/null").replace("{AT}", "@-")} ${eventUrl(agent, state)} || true`;
 // Windows: PowerShell (Cursor documented; Codex: "command hooks require PowerShell on Windows").
-// curl.exe, not curl (an Invoke-WebRequest alias in Windows PowerShell); stdin arrives as $input.
+// curl.exe, not curl (an Invoke-WebRequest alias in Windows PowerShell). curl.exe inherits the
+// hook's stdin and sends its bytes as they are. Never pipe `$input |`: PowerShell re-encodes it with
+// $OutputEncoding (adds a BOM when a profile or host sets UTF-8, mangles non-ASCII, appends CRLF).
 export const curlWindows = (agent, state) =>
-  `$input | curl.exe ${CURL_OPTS.replace("{NULL}", "NUL").replace("{AT}", "'@-'")} ${eventUrl(agent, state)}; exit 0`;
+  `curl.exe ${CURL_OPTS.replace("{NULL}", "NUL").replace("{AT}", "'@-'")} ${eventUrl(agent, state)}; exit 0`;
 
 // Claude Code: native HTTP hooks (no process at all on the PC). HTTP hooks are always
 // synchronous in Claude Code (async is ignored), so keep the timeout at 1 s; the app must
