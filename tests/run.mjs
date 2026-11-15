@@ -324,7 +324,9 @@ const hbOf = (sid) => posts.filter((p) => p.body.hb === true && p.body.h === h(s
   posts.length = 0;
   const big = JSON.stringify({ session_id: "s-big", hook_event_name: "PostToolUse", tool_response: "x".repeat(8 << 20) });
   const r = await runCloud("done", "s-big", cenv, big);
-  ok(r.code === 0 && r.ms < 4000 && posts[0]?.body.h === h("s-big"), `8 MB hook input: ${r.ms} ms`);
+  // Find our post: a heartbeat from an earlier test may land first.
+  ok(r.code === 0 && r.ms < 4000 && posts.some((p) => p.body.h === h("s-big")), `8 MB hook input: ${r.ms} ms`,
+     JSON.stringify({ code: r.code, out: r.out, posts: posts.map((p) => p.body) }));
 }
 {
   posts.length = 0;
