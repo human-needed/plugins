@@ -1,0 +1,71 @@
+{
+  "description": "HumanNeeded: reports Codex's state to the HumanNeeded app (local HTTP).",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -o /dev/null --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:24816/v1/event/codex/working || true",
+            "commandWindows": "curl.exe -s -o NUL --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'Content-Type: application/json' --data-binary '@-' http://127.0.0.1:24816/v1/event/codex/working; exit 0",
+            "timeout": 3,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -o /dev/null --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:24816/v1/event/codex/working || true",
+            "commandWindows": "curl.exe -s -o NUL --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'Content-Type: application/json' --data-binary '@-' http://127.0.0.1:24816/v1/event/codex/working; exit 0",
+            "timeout": 3,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -o /dev/null --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:24816/v1/event/codex/needs || true",
+            "commandWindows": "curl.exe -s -o NUL --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'Content-Type: application/json' --data-binary '@-' http://127.0.0.1:24816/v1/event/codex/needs; exit 0",
+            "timeout": 3,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -o /dev/null --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:24816/v1/event/codex/done || true",
+            "commandWindows": "curl.exe -s -o NUL --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'Content-Type: application/json' --data-binary '@-' http://127.0.0.1:24816/v1/event/codex/done; exit 0",
+            "timeout": 3,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -o /dev/null --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:24816/v1/event/codex/end || true",
+            "commandWindows": "curl.exe -s -o NUL --connect-timeout 0.3 -m 1.5 --noproxy '*' -H 'Content-Type: application/json' --data-binary '@-' http://127.0.0.1:24816/v1/event/codex/end; exit 0",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

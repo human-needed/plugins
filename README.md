@@ -1,72 +1,73 @@
 # HumanNeeded plugins
 
-> **Status (2026-11): prototype, being rebuilt.** The plugins below (0.1.x) talk to the puck
-> directly with PowerShell/sh scripts. They are being replaced by thin integrations that call the
-> HumanNeeded app (`hn` command), with a new puck protocol. The 0.1.x plugins and their cloud relay
-> format will not be supported after that. Branch `test` holds the hardened relay experiments
-> (reference only).
+Agent integrations for the [HumanNeeded](https://human-needed.com) puck: a USB desk light that
+glows and chimes when your AI coding agent is working, done, or needs you.
 
-Agent plugins for the [HumanNeeded](https://human-needed.com) puck: a USB desk light that glows and
-chimes when your AI coding agent is working, done, or needs you. Setup guide:
-[human-needed.com/start](https://human-needed.com/start/).
+The **HumanNeeded app** runs on your computer and owns the puck. It listens on
+`http://127.0.0.1:24816` (your computer only). Every integration just posts the agent's hook
+data to `/v1/event/<agent>/<state>`. If the app isn't running, nothing happens.
+The app can install and remove each integration for you
+([`integrations/manifest.json`](integrations/manifest.json)); manual steps are below.
 
-## Claude Code
+## Claude Code (Windows, macOS, Linux; desktop app, CLI, IDE)
 
-The prototype plugin is Windows only (the macOS plugin was removed 2026-11-13; Mac returns with the HumanNeeded app). In the Claude desktop app: **+** next to
-the prompt box → **Add plugins**, add the marketplace `human-needed/plugins`, then install
-**humanneeded** for your user account. Or in a terminal:
+In the Claude desktop app: **+** next to the prompt box → **Plugins** → add the marketplace
+`human-needed/plugins`, then install **humanneeded**. Or in a terminal:
 
 ```bash
-claude plugin install humanneeded --marketplace human-needed/plugins
+claude plugin marketplace add human-needed/plugins
 ```
 
-New sessions then drive the puck: blue while working, amber when Claude needs a permission or an
-answer, green when it finishes. Ask Claude "test my puck" or "make needs purple".
+```bash
+claude plugin install humanneeded@humanneeded
+```
 
-Remove it with `claude plugin uninstall humanneeded@humanneeded`.
+New sessions light the puck. Ask Claude "test my puck", "mute for an hour" or "make needs purple".
+The hooks are Claude's own HTTP hooks: nothing else runs on your computer.
 
-**Cloud sessions (Cowork, claude.ai/code):** their hooks run in a Linux VM that can't reach your
-computer. There `scripts/hn.sh` hands each state to `scripts/relay.sh`, which POSTs it to the
-HumanNeeded relay (`relay/`) under a key derived from your Claude account:
-sha256("humanneeded-account:" + accountUuid)[:32], read from `~/.claude.json`. The plugin's
-connector on your computer (`hn-mcp.ps1`, started by the Claude app) reads the same
-accountUuid from its own `.claude.json`, holds a WebSocket to the relay under that key, and passes
-the states that arrive to the puck. No setup. Messages carry only the state, the account key, a
-short hash of the session id, the agent name and a timestamp; the relay stores no messages and
-nothing is saved in the cloud session. Local sessions never use the relay.
+If you use an HTTP proxy (`HTTP_PROXY`/`HTTPS_PROXY`), add `127.0.0.1` to `NO_PROXY`, or Claude
+sends the hook calls to the proxy.
 
-Codex and Cursor plugins are coming.
+**Cloud sessions** (Cowork, claude.ai/code) run their hooks in a Linux VM that can't reach your
+computer. There [`cloud/hn-cloud.sh`](plugins/claude/cloud/hn-cloud.sh) posts each state to the
+HumanNeeded relay under a key derived from your Claude account and keeps a heartbeat while the
+session is working or waiting on you. On your own computer that script exits at once.
+
+## Codex (CLI and app)
+
+Add the entries of [`plugins/codex/hooks.json`](plugins/codex/hooks.json) to
+`~/.codex/hooks.json` (create it if missing; keep your own hooks), restart Codex, then **approve
+the hooks** (`/hooks` in the CLI, Settings → Hooks in the app). They use the `curl` built into
+Windows, macOS and Linux.
+
+## Cursor
+
+Add the entries of [`plugins/cursor/hooks.json`](plugins/cursor/hooks.json) (Windows:
+[`hooks.windows.json`](plugins/cursor/hooks.windows.json)) to `~/.cursor/hooks.json` (create it
+with `{"version": 1, "hooks": {}}` if missing). Cursor has no "needs you" hook yet, so the puck
+shows working and done only.
 
 ## Layout
 
 ```
 .claude-plugin/marketplace.json   Claude Code marketplace (this repo)
-plugins/claude/                   Windows plugin "humanneeded": hooks, connector (.mcp.json), skill
-host/hn.ps1                       Windows script the hooks call; talks to the puck over USB serial
-host/hn-mcp.ps1                   Windows connector (MCP over stdio): set_state tool + relay listener
-host/hn.sh                        runs in cloud VMs (hands states to relay.sh)
-host/relay.sh                     cloud VM side: posts states to the relay
-host/SKILL.template.md            the "humanneeded" skill, built into each plugin
-relay/                            the relay (CloudFormation: Lambda function URL + WebSocket API)
+plugins/claude/                   Claude Code plugin "humanneeded": HTTP hooks, cloud hook, skill
+plugins/codex/hooks.json          Codex hooks (curl)
+plugins/cursor/hooks*.json        Cursor hooks (curl; macOS/Linux and Windows)
+integrations/manifest.json        how the app detects / installs / removes each integration
+tools/gen-hooks.mjs               generates every hook file from one mapping table
+tests/run.mjs                     tests; tests/fake-hub.mjs is a stand-in for the app
+relay/                            the old cloud relay (being replaced)
 ```
 
-`plugins/*/scripts/` and `plugins/*/skills/` are built from `host/`, because installed plugins
-can't reach outside their folder. After editing anything in `host/`, run `host/sync-plugins.ps1`.
-Each plugin's `hooks/hooks.json` and `.mcp.json` are edited in place.
+Edit the mapping in `tools/gen-hooks.mjs`, never the hook files, then:
 
-Try the script by hand:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File host\hn.ps1 hello
-powershell -ExecutionPolicy Bypass -File host\hn.ps1 test needs
-'{"session_id":"s1"}' | powershell -ExecutionPolicy Bypass -File host\hn.ps1 done
+```bash
+node tools/gen-hooks.mjs
 ```
 
-It finds the puck by its `HN…` USB serial number, caches the COM port in
-`%USERPROFILE%\.humanneeded\port`, always exits 0, and gives up silently after ~2 s.
-Each run adds a line to `%USERPROFILE%\.humanneeded\hn.log` (time, command, the puck's reply or
-"no puck", and the plugin folder it ran from), so you can see whether an app's hooks are firing.
+```bash
+node tests/run.mjs
+```
 
-To release a change, bump `version` in both plugins' `.claude-plugin/plugin.json` and push.
-Users get it with `claude plugin marketplace update humanneeded`, or automatically if they turn on
-auto-update for the marketplace.
+To release a change, bump `version` in `plugins/claude/.claude-plugin/plugin.json` and push.

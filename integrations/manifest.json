@@ -1,0 +1,153 @@
+{
+  "schema": "hn-integrations/0 (accepted D-045; D-047: hooks talk to the app over local HTTP)",
+  "paths": "~ = user home (%USERPROFILE% on Windows). Merge ops keep every entry that is not ours; ours = a hook whose command contains `marker`.",
+  "hub": "Every hook POSTs the agent hook JSON to http://127.0.0.1:24816/v1/event/<agent>/<state>. The app writes the template files as they are (no path to fill in).",
+  "agents": {
+    "claude": {
+      "name": "Claude Code",
+      "detect": {
+        "any": [
+          {
+            "dir": "~/.claude"
+          },
+          {
+            "command": "claude"
+          },
+          {
+            "dir": "%APPDATA%/Claude/claude-code",
+            "os": "windows"
+          },
+          {
+            "dir": "~/Library/Application Support/Claude/claude-code",
+            "os": "macos"
+          }
+        ]
+      },
+      "installed": {
+        "json": "~/.claude/settings.json",
+        "pointer": "/enabledPlugins/humanneeded@humanneeded",
+        "equals": true
+      },
+      "install": {
+        "preferred": {
+          "run": [
+            [
+              "claude",
+              "plugin",
+              "marketplace",
+              "add",
+              "human-needed/plugins"
+            ],
+            [
+              "claude",
+              "plugin",
+              "install",
+              "humanneeded@humanneeded",
+              "--scope",
+              "user"
+            ]
+          ],
+          "note": "`claude` may only exist inside the Claude desktop app (%APPDATA%/Claude/claude-code/<ver>/claude.exe); use that path when it is not on PATH."
+        },
+        "fallback": {
+          "json_merge": "~/.claude/settings.json",
+          "set": {
+            "/extraKnownMarketplaces/humanneeded": {
+              "source": {
+                "source": "github",
+                "repo": "human-needed/plugins"
+              }
+            },
+            "/enabledPlugins/humanneeded@humanneeded": true
+          },
+          "note": "Claude installs it on its next start. UNVERIFIED: WS-APP to confirm."
+        }
+      },
+      "remove": {
+        "run": [
+          [
+            "claude",
+            "plugin",
+            "uninstall",
+            "humanneeded@humanneeded",
+            "--scope",
+            "user"
+          ]
+        ],
+        "fallback": {
+          "json_merge": "~/.claude/settings.json",
+          "delete": [
+            "/enabledPlugins/humanneeded@humanneeded"
+          ]
+        }
+      },
+      "manual": "In Claude: + next to the prompt box > Plugins > Add marketplace `human-needed/plugins` > install humanneeded. Or in a terminal: claude plugin marketplace add human-needed/plugins, then claude plugin install humanneeded@humanneeded. New sessions light the puck.",
+      "restart_needed": "new sessions only"
+    },
+    "codex": {
+      "name": "Codex",
+      "detect": {
+        "any": [
+          {
+            "dir": "~/.codex"
+          },
+          {
+            "command": "codex"
+          }
+        ]
+      },
+      "installed": {
+        "hooks_json": "~/.codex/hooks.json",
+        "marker": "127.0.0.1:24816/v1/event/codex/"
+      },
+      "install": {
+        "hooks_json_merge": "~/.codex/hooks.json",
+        "from": "plugins/codex/hooks.json",
+        "format": "codex",
+        "after": "Codex runs new hooks only after the user trusts them: tell the user to open Codex and approve them (CLI: /hooks; app: Settings > Hooks or the 'Review hooks' prompt). Can't be automated (trust is per hook hash)."
+      },
+      "remove": {
+        "hooks_json_remove": "~/.codex/hooks.json",
+        "marker": "127.0.0.1:24816/v1/event/codex/"
+      },
+      "manual": "Copy the entries of plugins/codex/hooks.json (github.com/human-needed/plugins) into ~/.codex/hooks.json (create it if missing), restart Codex, then approve the hooks in /hooks (CLI) or Settings > Hooks (app).",
+      "restart_needed": "new sessions; hooks must be trusted"
+    },
+    "cursor": {
+      "name": "Cursor",
+      "detect": {
+        "any": [
+          {
+            "dir": "~/.cursor"
+          },
+          {
+            "command": "cursor"
+          },
+          {
+            "command": "cursor-agent"
+          }
+        ]
+      },
+      "installed": {
+        "hooks_json": "~/.cursor/hooks.json",
+        "marker": "127.0.0.1:24816/v1/event/cursor/"
+      },
+      "install": {
+        "hooks_json_merge": "~/.cursor/hooks.json",
+        "from": {
+          "windows": "plugins/cursor/hooks.windows.json",
+          "macos": "plugins/cursor/hooks.json",
+          "linux": "plugins/cursor/hooks.json"
+        },
+        "format": "cursor",
+        "note": "Create the file as {\"version\":1,\"hooks\":{}} when missing. Cursor reloads it on save."
+      },
+      "remove": {
+        "hooks_json_remove": "~/.cursor/hooks.json",
+        "marker": "127.0.0.1:24816/v1/event/cursor/"
+      },
+      "manual": "Add the entries of plugins/cursor/hooks.json (Windows: hooks.windows.json) from github.com/human-needed/plugins to ~/.cursor/hooks.json (create it with {\"version\": 1, \"hooks\": {}} if missing). Cursor picks it up at once.",
+      "restart_needed": "no"
+    }
+  }
+}

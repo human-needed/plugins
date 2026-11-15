@@ -1,147 +1,24 @@
 {
+  "description": "HumanNeeded: reports Claude's state to the HumanNeeded app (local HTTP) or, in cloud sessions, to the relay.",
   "hooks": {
     "UserPromptSubmit": [
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "powershell.exe",
-            "args": [
-              "-NoProfile",
-              "-NonInteractive",
-              "-WindowStyle",
-              "Hidden",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
-              "working",
-              "claude"
-            ],
-            "async": true,
-            "timeout": 5
+            "type": "http",
+            "url": "http://127.0.0.1:24816/v1/event/claude/working",
+            "timeout": 1
           },
           {
             "type": "command",
-            "command": "bash",
+            "command": "sh",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh",
-              "working",
-              "claude"
-            ],
-            "cloud": "device",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "AskUserQuestion",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "powershell.exe",
-            "args": [
-              "-NoProfile",
-              "-NonInteractive",
-              "-WindowStyle",
-              "Hidden",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
-              "needs",
-              "claude"
+              "${CLAUDE_PLUGIN_ROOT}/cloud/hn-cloud.sh",
+              "working"
             ],
             "async": true,
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh",
-              "needs",
-              "claude"
-            ],
-            "cloud": "device",
             "timeout": 5,
-            "async": true
-          }
-        ]
-      }
-    ],
-    "PermissionRequest": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "powershell.exe",
-            "args": [
-              "-NoProfile",
-              "-NonInteractive",
-              "-WindowStyle",
-              "Hidden",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
-              "needs",
-              "claude"
-            ],
-            "async": true,
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh",
-              "needs",
-              "claude"
-            ],
-            "cloud": "device",
-            "timeout": 5,
-            "async": true
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "permission_prompt|idle_prompt",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "powershell.exe",
-            "args": [
-              "-NoProfile",
-              "-NonInteractive",
-              "-WindowStyle",
-              "Hidden",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
-              "needs",
-              "claude"
-            ],
-            "async": true,
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh",
-              "needs",
-              "claude"
-            ],
-            "cloud": "device",
-            "timeout": 5,
-            "async": true
+            "cloud": "skip"
           }
         ]
       }
@@ -151,34 +28,89 @@
         "matcher": "*",
         "hooks": [
           {
-            "type": "command",
-            "command": "powershell.exe",
-            "args": [
-              "-NoProfile",
-              "-NonInteractive",
-              "-WindowStyle",
-              "Hidden",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
-              "working",
-              "claude"
-            ],
-            "async": true,
-            "timeout": 5
+            "type": "http",
+            "url": "http://127.0.0.1:24816/v1/event/claude/working",
+            "timeout": 1
           },
           {
             "type": "command",
-            "command": "bash",
+            "command": "sh",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh",
-              "working",
-              "claude"
+              "${CLAUDE_PLUGIN_ROOT}/cloud/hn-cloud.sh",
+              "working"
             ],
-            "cloud": "device",
+            "async": true,
             "timeout": 5,
-            "async": true
+            "cloud": "skip"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|idle_prompt",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:24816/v1/event/claude/needs",
+            "timeout": 1
+          },
+          {
+            "type": "command",
+            "command": "sh",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/cloud/hn-cloud.sh",
+              "needs"
+            ],
+            "async": true,
+            "timeout": 5,
+            "cloud": "skip"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:24816/v1/event/claude/needs",
+            "timeout": 1
+          },
+          {
+            "type": "command",
+            "command": "sh",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/cloud/hn-cloud.sh",
+              "needs"
+            ],
+            "async": true,
+            "timeout": 5,
+            "cloud": "skip"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:24816/v1/event/claude/needs",
+            "timeout": 1
+          },
+          {
+            "type": "command",
+            "command": "sh",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/cloud/hn-cloud.sh",
+              "needs"
+            ],
+            "async": true,
+            "timeout": 5,
+            "cloud": "skip"
           }
         ]
       }
@@ -187,34 +119,20 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "powershell.exe",
-            "args": [
-              "-NoProfile",
-              "-NonInteractive",
-              "-WindowStyle",
-              "Hidden",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
-              "done",
-              "claude"
-            ],
-            "async": true,
-            "timeout": 5
+            "type": "http",
+            "url": "http://127.0.0.1:24816/v1/event/claude/done",
+            "timeout": 1
           },
           {
             "type": "command",
-            "command": "bash",
+            "command": "sh",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh",
-              "done",
-              "claude"
+              "${CLAUDE_PLUGIN_ROOT}/cloud/hn-cloud.sh",
+              "done"
             ],
-            "cloud": "device",
+            "async": true,
             "timeout": 5,
-            "async": true
+            "cloud": "skip"
           }
         ]
       }
@@ -223,34 +141,20 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "powershell.exe",
-            "args": [
-              "-NoProfile",
-              "-NonInteractive",
-              "-WindowStyle",
-              "Hidden",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.ps1",
-              "end",
-              "claude"
-            ],
-            "async": true,
-            "timeout": 5
+            "type": "http",
+            "url": "http://127.0.0.1:24816/v1/event/claude/end",
+            "timeout": 1
           },
           {
             "type": "command",
-            "command": "bash",
+            "command": "sh",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hn.sh",
-              "end",
-              "claude"
+              "${CLAUDE_PLUGIN_ROOT}/cloud/hn-cloud.sh",
+              "end"
             ],
-            "cloud": "device",
+            "async": true,
             "timeout": 5,
-            "async": true
+            "cloud": "skip"
           }
         ]
       }
