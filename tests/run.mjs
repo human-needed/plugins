@@ -195,13 +195,16 @@ console.log("2. curl hooks against a stand-in hub (Codex, Cursor)");
 console.log("3. cloud hook (hn-relay/1 §4) against a local relay stand-in");
 const script = join(root, "plugins", "claude", "cloud", "hn-cloud.sh");
 const posts = [];
-let replyCode = 202, reply429 = 0;
+let replyCode = 202;
+const reply429 = new Map();   // session hash -> 429s still to send (per session: other tests' heartbeats can't use them up)
 const server = createServer((req, res) => {
   let body = "";
   req.on("data", (d) => (body += d));
   req.on("end", () => {
-    posts.push({ t: Date.now(), path: req.url, body: JSON.parse(body) });
-    if (reply429 > 0) { reply429--; res.writeHead(429); return res.end(); }
+    const p = { t: Date.now(), path: req.url, body: JSON.parse(body) };
+    posts.push(p);
+    const left = reply429.get(p.body.h) ?? 0;
+    if (left > 0) { reply429.set(p.body.h, left - 1); res.writeHead(429); return res.end(); }
     res.writeHead(replyCode); res.end();
   });
 });
@@ -262,14 +265,19 @@ const h = (sid) => sha(sid).slice(0, 16);
   ok(posts.length === 1, "done: no heartbeat");
 }
 {
-  posts.length = 0; reply429 = 2;
-  const r = await runCloud("needs", "s-429");
-  ok(posts.length === 3 && posts.every((p) => p.body.s === "needs") && r.ms < 4000,
-     `429 twice: retried twice, ${r.ms} ms`, String(posts.length));
-  reply429 = 3; posts.length = 0;
+  // Behaviour, not timing: count this session's posts only (a heartbeat from another test may
+  // land meanwhile); the time bound is only a hang guard (worst case is ~3.7 s of jitter).
+  const mine = (sid) => posts.filter((p) => p.body.h === h(sid) && !p.body.hb);
+  reply429.set(h("s-429"), 2);
+  const r = await runCloud("done", "s-429");
+  ok(r.code === 0 && mine("s-429").length === 3 && mine("s-429").every((p) => p.body.s === "done") && r.ms < 15000,
+     `429 twice: retried twice, then delivered`, JSON.stringify(mine("s-429").map((p) => p.body)));
+  reply429.set(h("s-429b"), 99);
   const r2 = await runCloud("end", "s-429b");
-  ok(posts.length === 3 && r2.ms < 4000, `429 always: gives up after 2 retries, ${r2.ms} ms`);
-  reply429 = 0;
+  await sleep(1000);                                  // any extra retry would show up here
+  ok(r2.code === 0 && mine("s-429b").length === 3 && r2.ms < 15000,
+     `429 always: gives up after 2 retries`, JSON.stringify(mine("s-429b").map((p) => p.body)));
+  reply429.clear();
 }
 // The heartbeat loop watches the hook's parent ($PPID = the Claude process). Stand in for Claude
 // with a shell that runs the hook and then stays alive (a native parent such as node would show
