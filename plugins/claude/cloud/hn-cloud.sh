@@ -3,19 +3,22 @@
 #
 #   sh hn-cloud.sh <working|needs|done|idle|end>     (hook JSON on stdin)
 #
-# Runs only inside a cloud Claude VM (CLAUDE_CODE_REMOTE=true); anywhere else it exits at once,
-# so on a PC the `hn` hook alone reports the state. POSTs
+# Runs only inside a cloud Claude VM: claude.ai/code web sessions (CLAUDE_CODE_REMOTE=true) and
+# cloud Cowork tasks (CLAUDE_CODE_ENTRYPOINT=remote_cowork). Anywhere else it exits at once: on
+# a PC the plugin's HTTP hooks report to the HumanNeeded app instead. POSTs
 #   {"v":1,"s":state,"h":sha256(session_id)[:16],"ts":ms,"hb":false}
 # to RELAY_POST<K>, K = sha256("humanneeded-account:" + accountUuid from ~/.claude.json)[:32].
 # While the session is working/needs, one detached loop per session re-posts the current state
 # with "hb":true every 45 s while the Claude process is alive.
 # Prints nothing, always exits 0, within 4 s. Log: /tmp/hn-cloud/log (no key in it).
 
-# The one place the relay address lives. Old relay until WS-CLOUD ships v1, then:
-#   RELAY_POST="https://relay.human-needed.com/v1/h/"
-RELAY_POST="https://tcxdfuid4msoglniqenx2qhnza0gwwyq.lambda-url.us-east-2.on.aws/h/"
+# The one place the relay address lives (relay-api §1).
+RELAY_POST="https://relay.human-needed.com/v1/h/"
 
-[ "$CLAUDE_CODE_REMOTE" = "true" ] || exit 0
+case "$CLAUDE_CODE_REMOTE:$CLAUDE_CODE_ENTRYPOINT" in
+  true:*|*:remote|*:remote_*) ;;
+  *) exit 0 ;;
+esac
 exec >/dev/null 2>&1
 T_START="$(date +%s%3N 2>/dev/null)"
 

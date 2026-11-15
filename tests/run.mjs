@@ -107,6 +107,8 @@ for (const e of ALL["plugins/claude/hooks/hooks.json"]) {
 ok(ALL["plugins/claude/hooks/hooks.json"].filter((e) => what(e).kind === "cloud").length === Object.keys(CONTRACT.claude).length,
    "claude: one cloud hook per event");
 
+ok(readFileSync(join(root, "plugins/claude/cloud/hn-cloud.sh"), "utf8").includes('RELAY_POST="https://relay.human-needed.com/v1/h/"'),
+   "cloud hook posts to relay.human-needed.com/v1/h/ (relay-api §1)");
 const plugin = readJson("plugins/claude/.claude-plugin/plugin.json");
 ok(plugin.name === "humanneeded" && /^2\./.test(plugin.version), "claude plugin.json name/version 2.x");
 const mkt = readJson(".claude-plugin/marketplace.json");
@@ -239,6 +241,18 @@ const h = (sid) => sha(sid).slice(0, 16);
   const r = await runCloud("working", "local-1", { ...cenv, CLAUDE_CODE_REMOTE: "" });
   await sleep(300);
   ok(r.code === 0 && r.out === "" && posts.length === 0, "not in a cloud VM: exits at once, posts nothing", JSON.stringify(r));
+  // Local entrypoints never post; cloud ones (web: CLAUDE_CODE_REMOTE, Cowork: remote_cowork) do.
+  for (const ep of ["cli", "claude-desktop", "sdk-ts", "claude-vscode", ""]) {
+    const n = posts.length;
+    await runCloud("done", "local-" + ep, { ...cenv, CLAUDE_CODE_REMOTE: "", CLAUDE_CODE_ENTRYPOINT: ep });
+    ok(posts.length === n, `entrypoint "${ep}" (local): posts nothing`);
+  }
+  for (const ep of ["remote_cowork", "remote"]) {
+    const n = posts.length;
+    await runCloud("done", "cloud-" + ep, { ...cenv, CLAUDE_CODE_REMOTE: "", CLAUDE_CODE_ENTRYPOINT: ep });
+    ok(posts.slice(n).some((p) => p.body.h === h("cloud-" + ep)), `entrypoint "${ep}" (cloud): posts`);
+  }
+  posts.length = 0;
 }
 {
   // Without HN_DEV=1 the test overrides are ignored. No account here, so nothing is sent to the
