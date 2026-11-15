@@ -17,8 +17,7 @@
               "working"
             ],
             "async": true,
-            "timeout": 5,
-            "cloud": "skip"
+            "timeout": 5
           }
         ]
       }
@@ -40,8 +39,7 @@
               "working"
             ],
             "async": true,
-            "timeout": 5,
-            "cloud": "skip"
+            "timeout": 5
           }
         ]
       }
@@ -63,8 +61,7 @@
               "needs"
             ],
             "async": true,
-            "timeout": 5,
-            "cloud": "skip"
+            "timeout": 5
           }
         ]
       }
@@ -86,8 +83,7 @@
               "needs"
             ],
             "async": true,
-            "timeout": 5,
-            "cloud": "skip"
+            "timeout": 5
           }
         ]
       }
@@ -109,8 +105,7 @@
               "needs"
             ],
             "async": true,
-            "timeout": 5,
-            "cloud": "skip"
+            "timeout": 5
           }
         ]
       }
@@ -131,8 +126,7 @@
               "done"
             ],
             "async": true,
-            "timeout": 5,
-            "cloud": "skip"
+            "timeout": 5
           }
         ]
       }
@@ -153,8 +147,7 @@
               "end"
             ],
             "async": true,
-            "timeout": 5,
-            "cloud": "skip"
+            "timeout": 5
           }
         ]
       }

@@ -102,8 +102,12 @@ for (const e of ALL["plugins/claude/hooks/hooks.json"]) {
   const w = what(e);
   if (w.kind !== "cloud") continue;
   ok(e.h.args[0] === "${CLAUDE_PLUGIN_ROOT}/cloud/hn-cloud.sh" && CONTRACT.claude[e.ev]?.[0] === w.state &&
-     e.h.async === true && e.h.cloud === "skip", `claude ${e.ev}: cloud hook -> ${w.state}`);
+     e.h.async === true && !("cloud" in e.h), `claude ${e.ev}: cloud hook -> ${w.state}`);
 }
+// Only documented hook fields: Claude's plugin sync strips (and warns about) anything else.
+const DOC = { http: ["type", "url", "timeout"], command: ["type", "command", "args", "async", "timeout"] };
+for (const e of ALL["plugins/claude/hooks/hooks.json"])
+  ok(Object.keys(e.h).every((k) => DOC[e.h.type]?.includes(k)), `claude ${e.ev}: only documented hook fields`, Object.keys(e.h).join(","));
 ok(ALL["plugins/claude/hooks/hooks.json"].filter((e) => what(e).kind === "cloud").length === Object.keys(CONTRACT.claude).length,
    "claude: one cloud hook per event");
 
@@ -334,7 +338,8 @@ const hbOf = (sid) => posts.filter((p) => p.body.hb === true && p.body.h === h(s
 {
   // Heartbeat stops when the Claude process (the hook's parent) dies.
   const parent = runUnderClaude("working", "s-dead");
-  await sleep(2500);
+  // Wait for the first heartbeat (slow CI runners can take a few seconds), up to 15 s.
+  for (let i = 0; i < 60 && hbOf("s-dead").length === 0; i++) await sleep(250);
   const n1 = hbOf("s-dead").length;
   parent.die();
   await sleep(2500);
