@@ -53,8 +53,9 @@ export const curlWindows = (agent, state) =>
 
 // Claude Code: native HTTP hooks (no process at all on the PC). HTTP hooks are always
 // synchronous in Claude Code (async is ignored), so keep the timeout at 1 s; the app must
-// answer at once. The second entry runs only in cloud VMs (cloud/hn-cloud.sh exits at once
-// unless CLAUDE_CODE_REMOTE=true); the HTTP hook in a VM hits nothing and fails in ms.
+// answer at once. The second entry does its work only in cloud VMs: cloud/hn-cloud.sh checks the
+// environment itself (CLAUDE_CODE_REMOTE / CLAUDE_CODE_ENTRYPOINT) and exits at once anywhere else.
+// The HTTP hook in a VM hits nothing and fails in ms. Only documented hook fields (no "cloud").
 function claude() {
   const hooks = {};
   for (const [ev, matcher, state] of MAPPING.claude) {
@@ -63,7 +64,7 @@ function claude() {
     group.hooks = [
       { type: "http", url: eventUrl("claude", state), timeout: 1 },
       { type: "command", command: "sh", args: ["${CLAUDE_PLUGIN_ROOT}/cloud/hn-cloud.sh", state],
-        async: true, timeout: 5, cloud: "skip" },
+        async: true, timeout: 5 },
     ];
     (hooks[ev] ??= []).push(group);
   }

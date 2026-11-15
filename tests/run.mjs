@@ -102,8 +102,12 @@ for (const e of ALL["plugins/claude/hooks/hooks.json"]) {
   const w = what(e);
   if (w.kind !== "cloud") continue;
   ok(e.h.args[0] === "${CLAUDE_PLUGIN_ROOT}/cloud/hn-cloud.sh" && CONTRACT.claude[e.ev]?.[0] === w.state &&
-     e.h.async === true && e.h.cloud === "skip", `claude ${e.ev}: cloud hook -> ${w.state}`);
+     e.h.async === true && !("cloud" in e.h), `claude ${e.ev}: cloud hook -> ${w.state}`);
 }
+// Only documented hook fields: Claude's plugin sync strips (and warns about) anything else.
+const DOC = { http: ["type", "url", "timeout"], command: ["type", "command", "args", "async", "timeout"] };
+for (const e of ALL["plugins/claude/hooks/hooks.json"])
+  ok(Object.keys(e.h).every((k) => DOC[e.h.type]?.includes(k)), `claude ${e.ev}: only documented hook fields`, Object.keys(e.h).join(","));
 ok(ALL["plugins/claude/hooks/hooks.json"].filter((e) => what(e).kind === "cloud").length === Object.keys(CONTRACT.claude).length,
    "claude: one cloud hook per event");
 
