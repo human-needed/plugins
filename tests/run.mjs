@@ -338,7 +338,8 @@ const hbOf = (sid) => posts.filter((p) => p.body.hb === true && p.body.h === h(s
 {
   // Heartbeat stops when the Claude process (the hook's parent) dies.
   const parent = runUnderClaude("working", "s-dead");
-  await sleep(2500);
+  // Wait for the first heartbeat (slow CI runners can take a few seconds), up to 15 s.
+  for (let i = 0; i < 60 && hbOf("s-dead").length === 0; i++) await sleep(250);
   const n1 = hbOf("s-dead").length;
   parent.die();
   await sleep(2500);
