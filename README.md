@@ -5,49 +5,86 @@
 Agent integrations for the [HumanNeeded](https://human-needed.com) puck: a USB desk light that
 glows and chimes when your AI coding agent is working, done, or needs you.
 
-The **HumanNeeded app** runs on your computer and owns the puck. It listens on
-`http://127.0.0.1:24816` (your computer only). Every integration just posts the agent's hook
-data to `/v1/event/<agent>/<state>`. If the app isn't running, nothing happens.
-The app can install and remove each integration for you
-([`integrations/manifest.json`](integrations/manifest.json)); manual steps are below.
+The **HumanNeeded app** runs on your computer and owns the puck. Install the app first, then
+add the agents you use below. Each one sends its state to the app on your computer only
+(`http://127.0.0.1:24816`). If the app isn't running, nothing happens.
 
-## Claude Code (Windows, macOS, Linux; desktop app, CLI, IDE)
+## Claude Code
 
-In the Claude desktop app: **+** next to the prompt box → **Plugins** → add the marketplace
-`human-needed/plugins`, then install **humanneeded**. Or in a terminal:
+1. In a terminal, run:
 
-```bash
-claude plugin marketplace add human-needed/plugins
-```
+   ```bash
+   claude plugin marketplace add human-needed/plugins
+   ```
 
-```bash
-claude plugin install humanneeded@humanneeded
-```
+   ```bash
+   claude plugin install humanneeded@humanneeded
+   ```
 
-New sessions light the puck. Ask Claude "test my puck", "mute for an hour" or "make needs purple".
-The hooks are Claude's own HTTP hooks: nothing else runs on your computer.
+   Or inside Claude Code type `/plugin marketplace add human-needed/plugins`, then
+   `/plugin install humanneeded@humanneeded`.
+2. Turn on auto-update (it's off for non-official marketplaces): in Claude Code type `/plugin`,
+   open **Marketplaces**, pick **humanneeded**, choose **Enable auto-update**.
+3. Start a new session. The puck lights up.
 
-If you use an HTTP proxy (`HTTP_PROXY`/`HTTPS_PROXY`), add `127.0.0.1` to `NO_PROXY`, or Claude
-sends the hook calls to the proxy.
+This works in the terminal, the desktop app and VS Code on the same computer. Updates arrive
+in the background and apply in your next session (or after `/reload-plugins`).
 
-**Cloud sessions** (Cowork, claude.ai/code) run their hooks in a Linux VM that can't reach your
-computer. There [`cloud/hn-cloud.sh`](plugins/claude/cloud/hn-cloud.sh) posts each state to the
-HumanNeeded relay under a key derived from your Claude account and keeps a heartbeat while the
-session is working or waiting on you. On your own computer that script exits at once.
+Ask Claude "test my puck", "mute for an hour" or "make needs purple".
+If you use an HTTP proxy, add `127.0.0.1` to `NO_PROXY`.
 
-## Codex (CLI and app)
+## Codex
 
-Add the entries of [`plugins/codex/hooks.json`](plugins/codex/hooks.json) to
-`~/.codex/hooks.json` (create it if missing; keep your own hooks), restart Codex, then **approve
-the hooks** (`/hooks` in the CLI, Settings → Hooks in the app). They use the `curl` built into
-Windows, macOS and Linux.
+1. Download our hooks file (these commands never overwrite a file you already have):
+
+   macOS / Linux:
+
+   ```bash
+   [ -e ~/.codex/hooks.json ] || { mkdir -p ~/.codex && curl -fsSL -o ~/.codex/hooks.json https://raw.githubusercontent.com/human-needed/plugins/main/plugins/codex/hooks.json; }
+   ```
+
+   Windows (PowerShell):
+
+   ```powershell
+   if (!(Test-Path $HOME\.codex\hooks.json)) { mkdir -Force $HOME\.codex | Out-Null; curl.exe -fsSL -o $HOME\.codex\hooks.json https://raw.githubusercontent.com/human-needed/plugins/main/plugins/codex/hooks.json }
+   ```
+
+   Already have one? Copy the entries of [`plugins/codex/hooks.json`](plugins/codex/hooks.json)
+   into it instead.
+2. Restart Codex and **approve the hooks**: `/hooks` in the CLI, or **Settings → Hooks** in the
+   app. Codex won't run them until you do.
+
+Codex has no auto-update for hooks. To update, delete the file (or our entries), repeat both
+steps, and approve the changed hooks again.
 
 ## Cursor
 
-Add the entries of [`plugins/cursor/hooks.json`](plugins/cursor/hooks.json) (Windows:
-[`hooks.windows.json`](plugins/cursor/hooks.windows.json)) to `~/.cursor/hooks.json` (create it
-with `{"version": 1, "hooks": {}}` if missing). Cursor has no "needs you" hook yet, so the puck
-shows working and done only.
+1. Download our hooks file (these commands never overwrite a file you already have):
+
+   macOS / Linux:
+
+   ```bash
+   [ -e ~/.cursor/hooks.json ] || { mkdir -p ~/.cursor && curl -fsSL -o ~/.cursor/hooks.json https://raw.githubusercontent.com/human-needed/plugins/main/plugins/cursor/hooks.json; }
+   ```
+
+   Windows (PowerShell):
+
+   ```powershell
+   if (!(Test-Path $HOME\.cursor\hooks.json)) { mkdir -Force $HOME\.cursor | Out-Null; curl.exe -fsSL -o $HOME\.cursor\hooks.json https://raw.githubusercontent.com/human-needed/plugins/main/plugins/cursor/hooks.windows.json }
+   ```
+
+   Already have one? Copy the entries of [`hooks.json`](plugins/cursor/hooks.json)
+   (Windows: [`hooks.windows.json`](plugins/cursor/hooks.windows.json)) into it instead.
+2. Done: Cursor picks it up at once. It shows working and done (Cursor has no "needs you" hook).
+
+Cursor has no auto-update for hooks. To update, delete the file (or our entries) and repeat step 1.
+
+## Cloud sessions (Claude)
+
+Cloud Cowork tasks run your Claude plugins in a cloud machine. There the plugin's
+[`cloud/hn-cloud.sh`](plugins/claude/cloud/hn-cloud.sh) sends each state through the
+HumanNeeded relay to the app (turn on the cloud link in the app). On your own computer that
+script does nothing.
 
 ## Layout
 
@@ -56,7 +93,7 @@ shows working and done only.
 plugins/claude/                   Claude Code plugin "humanneeded": HTTP hooks, cloud hook, skill
 plugins/codex/hooks.json          Codex hooks (curl)
 plugins/cursor/hooks*.json        Cursor hooks (curl; macOS/Linux and Windows)
-integrations/manifest.json        how the app detects / installs / removes each integration
+integrations/manifest.json        how the app detects each installed integration
 tools/gen-hooks.mjs               generates every hook file from one mapping table
 tests/run.mjs                     tests; tests/fake-hub.mjs is a stand-in for the app
 relay/                            the old cloud relay (being replaced)
