@@ -1,5 +1,7 @@
 # HumanNeeded plugins
 
+[![tests](https://github.com/human-needed/plugins/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/human-needed/plugins/actions/workflows/test.yml)
+
 Agent integrations for the [HumanNeeded](https://human-needed.com) puck: a USB desk light that
 glows and chimes when your AI coding agent is working, done, or needs you.
 
