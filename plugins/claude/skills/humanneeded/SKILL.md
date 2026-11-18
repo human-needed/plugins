@@ -31,7 +31,7 @@ Settings keys:
 
 - Global: `brightness`, `volume` (0-100). Each state's own brightness/volume is a share of these.
 - Per state (`needs`, `done`, `working`, `idle`): `<state>.color` `#RRGGBB`; `<state>.light`
-  `off|solid|breathe|pulse|blink|heartbeat|flicker|spin`; `<state>.brightness` 0-100;
+  `off|solid|breathe|blink|heartbeat|flicker|spin`; `<state>.brightness` 0-100;
   `<state>.duration` seconds; `<state>.sound` `none|ding|chime|rising|arpeggio|bell|beeps|bloop|bright|clock|doorbell|fanfare|ripple|call|lullaby|harp`;
   `<state>.volume` 0-100; `<state>.repeat` 1-5. Idle has no sound.
 
