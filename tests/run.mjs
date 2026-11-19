@@ -34,7 +34,7 @@ const CONTRACT = {
             Stop: ["done"], SessionEnd: ["end"] },
   cursor: { beforeSubmitPrompt: ["working"], stop: ["done"], sessionEnd: ["end"] },
 };
-const MATCHERS = { "claude:Notification": "permission_prompt|idle_prompt", "claude:PreToolUse": "AskUserQuestion" };
+const MATCHERS = { "claude:Notification": "permission_prompt|idle_prompt", "claude:PreToolUse": "AskUserQuestion|mcp__computer-use__request_access|mcp__computer-use__request_teach_access" };
 const expectArgs = (agent, state) => ["event", "--agent", agent, "--state", state, "--stdin-json"];
 
 // ---------------------------------------------------------------------------------------------

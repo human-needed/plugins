@@ -20,7 +20,7 @@ export const MAPPING = {
     ["PostToolUse", "*", "working"],
     ["Notification", "permission_prompt|idle_prompt", "needs"],
     ["PermissionRequest", "*", "needs"],
-    ["PreToolUse", "AskUserQuestion", "needs"],
+    ["PreToolUse", "AskUserQuestion|mcp__computer-use__request_access|mcp__computer-use__request_teach_access", "needs"],
     ["Stop", null, "done"],
     ["SessionEnd", null, "end"],
   ],
