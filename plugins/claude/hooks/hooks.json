@@ -90,7 +90,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "AskUserQuestion",
+        "matcher": "AskUserQuestion|mcp__computer-use__request_access|mcp__computer-use__request_teach_access",
         "hooks": [
           {
             "type": "http",
