@@ -192,7 +192,16 @@ async def main():
 
     # §4 rate limit per K: 2/s burst 10 -> a burst of 25 sees 429s; normal heartbeat cadence never does.
     kr = rnd(32)
-    codes = [post(kr, state())[0] for _ in range(25)]
+    # One keep-alive connection, back to back (the limit is per warm Lambda instance; a fully parallel
+    # burst spreads over instances, bounded overall by the stage throttle).
+    import http.client, urllib.parse
+    u = urllib.parse.urlparse(ARGS.post)
+    conn = http.client.HTTPSConnection(u.netloc, timeout=10)
+    codes = []
+    for _ in range(25):
+        conn.request("POST", f"/v1/h/{kr}", json.dumps(state()), {"content-type": "application/json"})
+        r = conn.getresponse(); r.read(); codes.append(r.status)
+    conn.close()
     check("burst over limit gets 429", codes.count(429) >= 5 and all(c in (202, 429) for c in codes), str(codes))
     check("first 10 of a burst accepted", codes[:10].count(202) >= 10 or codes.count(202) >= 10, str(codes))
 

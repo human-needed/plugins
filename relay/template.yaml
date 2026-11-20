@@ -296,7 +296,6 @@ Resources:
     Type: AWS::SNS::Topic
     Condition: HasEmail
     Properties:
-      KmsMasterKeyId: alias/aws/sns
       Subscription: [{ Protocol: email, Endpoint: !Ref AlertEmail }]
 
   AlertTopicPolicy:
@@ -365,7 +364,8 @@ Resources:
   # ---------- auto-brake: traffic far above normal -> throttle both APIs to 3/s ----------
   BrakeTopic:
     Type: AWS::SNS::Topic
-    Properties: { KmsMasterKeyId: alias/aws/sns }
+    # Not encrypted with alias/aws/sns: CloudWatch alarms can't publish to topics using that key.
+    Properties: {}
 
   BrakeTopicPolicy:
     Type: AWS::SNS::TopicPolicy
