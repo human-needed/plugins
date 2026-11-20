@@ -13,5 +13,5 @@
     "puck"
   ],
   "logo": "assets/icon.png",
-  "hooks": "./hooks.json"
+  "hooks": "./hooks/hooks.json"
 }

@@ -62,7 +62,8 @@ function what(e) {
 }
 
 const FILES = { claude: ["plugins/claude/hooks/hooks.json"], codex: ["plugins/codex/hooks.json"],
-                cursor: ["plugins/cursor/hooks.json", "plugins/cursor/hooks.windows.json"] };
+                cursor: ["plugins/cursor/hooks.json", "plugins/cursor/hooks.windows.json", "plugins/cursor/hooks/hooks.json"] };
+const ANY = "plugins/cursor/hooks/hooks.json"; // Cursor plugin: one file, sh (macOS/Linux) and PowerShell (Windows)
 const ALL = {};
 for (const [agent, rels] of Object.entries(FILES)) {
   for (const rel of rels) {
@@ -79,7 +80,13 @@ for (const [agent, rels] of Object.entries(FILES)) {
       const m = MATCHERS[`${agent}:${e.ev}`];
       if (m) ok(e.matcher === m, `${agent} ${e.ev}: matcher ${m}`, e.matcher);
       if (w.kind === "http") ok(e.h.timeout === 1 && !("headers" in e.h), `${rel} ${e.ev}: http hook, timeout 1 s`);
-      if (w.kind === "curl") {
+      if (w.kind === "curl" && rel === ANY) {
+        const c = e.h.command, [p, x] = c.split("; curl.exe ");
+        ok(p.startsWith("/usr/bin/curl ") && x && c.endsWith("; exit 0") && !c.includes("||") && !/[^']@-/.test(c),
+           `${rel} ${e.ev}: one command for sh and PowerShell (no ||, @- quoted)`, c);
+        ok(p.includes("-o /dev/null") && x.includes("-o NUL") && (p.match(URL_RE) ?? [])[0] === eventUrl(agent, w.state) &&
+           (x.match(URL_RE) ?? [])[0] === eventUrl(agent, w.state), `${rel} ${e.ev}: both halves post to ${w.state}`);
+      } else if (w.kind === "curl") {
         const cmds = [e.h.command, e.h.commandWindows].filter(Boolean);
         for (const c of cmds) {
           const win = c.startsWith("curl.exe ");
@@ -126,6 +133,12 @@ const cplug = readJson("plugins/codex/.codex-plugin/plugin.json");
 ok(cplug.name === "humanneeded" && /^\d+\.\d+\.\d+/.test(cplug.version) && cplug.hooks === "./hooks.json",
   "codex plugin.json name/version, hooks -> ./hooks.json");
 ok(Object.keys(readJson("plugins/codex/hooks.json").hooks).length >= 4, "codex plugin hooks file present");
+// Cursor plugin: Customize > Plugins > Add > From GitHub reads .cursor-plugin/marketplace.json.
+const kmkt = readJson(".cursor-plugin/marketplace.json"), kplug = readJson("plugins/cursor/.cursor-plugin/plugin.json");
+ok(kmkt.name === "humanneeded" && kmkt.plugins.length === 1 && kmkt.plugins[0].name === "humanneeded" &&
+   kmkt.plugins[0].source === "plugins/cursor", "cursor marketplace lists humanneeded -> plugins/cursor");
+ok(kplug.name === "humanneeded" && kplug.version === plugin.version && kplug.hooks === "./hooks/hooks.json",
+   "cursor plugin.json: same version as Claude, hooks -> ./hooks/hooks.json (the any-OS file)");
 const manifest = readJson("integrations/manifest.json");
 ok(eq(Object.keys(manifest.agents).sort(), ["claude", "codex", "cursor"]), "integrations/manifest.json has 3 agents");
 { // Claude desktop app installs land in <config>/Claude/rpm/<account>/<org>/plugin_*/skills/humanneeded.
@@ -161,11 +174,11 @@ console.log("2. curl hooks against a stand-in hub (Codex, Cursor)");
   const deadProxy = { ...process.env, HTTP_PROXY: "http://127.0.0.1:9", HTTPS_PROXY: "http://127.0.0.1:9",
                       http_proxy: "http://127.0.0.1:9", ALL_PROXY: "http://127.0.0.1:9", NO_PROXY: "" };
   const forms = [];
-  for (const rel of ["plugins/codex/hooks.json", "plugins/cursor/hooks.json", "plugins/cursor/hooks.windows.json"]) {
+  for (const rel of ["plugins/codex/hooks.json", "plugins/cursor/hooks.json", "plugins/cursor/hooks.windows.json", ANY]) {
     for (const e of ALL[rel]) {
       for (const cmd of [e.h.command, e.h.commandWindows].filter(Boolean)) {
-        const win = cmd.startsWith("curl.exe ");
-        if (win && !isWin) continue;                    // PowerShell forms on Windows only; sh forms everywhere
+        const win = cmd.startsWith("curl.exe ") || rel === ANY && isWin;
+        if (cmd.startsWith("curl.exe ") && !isWin) continue;                    // PowerShell forms on Windows only; sh forms everywhere
         forms.push({ rel, e, cmd });
       }
     }
@@ -179,7 +192,8 @@ console.log("2. curl hooks against a stand-in hub (Codex, Cursor)");
     const n = recs.length;
     const r = await runHook(cmd, input, deadProxy);
     const rec = recs[n];
-    ok(r.code === 0 && r.out === "", `${rel} ${e.ev}: exit 0, prints nothing (${r.ms} ms)`, JSON.stringify(r));
+    // The any-OS form prints one "not found" line for the other OS half; Cursor ignores hook stderr.
+    ok(r.code === 0 && (r.out === "" || rel === ANY), `${rel} ${e.ev}: exit 0, prints nothing (${r.ms} ms)`, JSON.stringify(r));
     ok(recs.length === n + 1 && rec.method === "POST" && rec.path === `/v1/event/${w.agent}/${w.state}` &&
        rec.headers["content-type"] === "application/json" && rec.headers.host === `127.0.0.1:${PORT}` &&
        !rec.headers.origin && rec.body === input && rec.bytes === Buffer.byteLength(input),

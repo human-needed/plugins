@@ -51,6 +51,14 @@ export const curlPosix = (agent, state) =>
 export const curlWindows = (agent, state) =>
   `curl.exe ${CURL_OPTS.replace("{NULL}", "NUL").replace("{AT}", "'@-'")} ${eventUrl(agent, state)}; exit 0`;
 
+// Cursor plugin (one hooks file for every OS). Cursor runs hook commands with sh on macOS/Linux and
+// PowerShell on Windows, so the command must parse in both: no `||`, `@-` quoted, `;` only.
+// sh: /usr/bin/curl posts, curl.exe is "not found". PowerShell: /usr/bin/curl is "not found",
+// curl.exe posts. Only one of them ever reads stdin.
+export const curlAnyOS = (agent, state) =>
+  `/usr/bin/curl ${CURL_OPTS.replace("{NULL}", "/dev/null").replace("{AT}", "'@-'")} ${eventUrl(agent, state)}; ` +
+  `curl.exe ${CURL_OPTS.replace("{NULL}", "NUL").replace("{AT}", "'@-'")} ${eventUrl(agent, state)}; exit 0`;
+
 // Claude Code: native HTTP hooks (no process at all on the PC). HTTP hooks are always
 // synchronous in Claude Code (async is ignored), so keep the timeout at 1 s; the app must
 // answer at once. The second entry does its work only in cloud VMs: cloud/hn-cloud.sh checks the
@@ -91,7 +99,7 @@ function codex() {
 function cursor(os) {
   const hooks = {};
   for (const [ev, , state] of MAPPING.cursor) {
-    const command = os === "windows" ? curlWindows("cursor", state) : curlPosix("cursor", state);
+    const command = os === "any" ? curlAnyOS("cursor", state) : os === "windows" ? curlWindows("cursor", state) : curlPosix("cursor", state);
     (hooks[ev] ??= []).push({ command, timeout: 3 });
   }
   return { version: 1, hooks };
@@ -102,6 +110,7 @@ export const OUTPUTS = {
   "plugins/codex/hooks.json": codex(),
   "plugins/cursor/hooks.json": cursor("posix"),
   "plugins/cursor/hooks.windows.json": cursor("windows"),
+  "plugins/cursor/hooks/hooks.json": cursor("any"),
 };
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
