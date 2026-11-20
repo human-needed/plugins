@@ -11,53 +11,77 @@ add the agents you use below. Each one sends its state to the app on your comput
 
 ## Claude Code
 
-1. In a terminal, run:
+Choose one way. They all do the same thing.
 
-   ```bash
-   claude plugin marketplace add human-needed/plugins
-   ```
+### Way 1: the Claude app
 
-   ```bash
-   claude plugin install humanneeded@humanneeded
-   ```
+1. Open the Claude app and go to **Customize → Plugins**.
+2. Click **Add marketplace** and enter `human-needed/plugins`.
+3. Find **humanneeded** and click **Install**.
+4. Start a new Claude Code session.
+5. Check: send any message. The puck glows "working", then "done" when Claude stops.
 
-   Or inside Claude Code type `/plugin marketplace add human-needed/plugins`, then
-   `/plugin install humanneeded@humanneeded`.
-2. Turn on auto-update (it's off for non-official marketplaces): in Claude Code type `/plugin`,
-   open **Marketplaces**, pick **humanneeded**, choose **Enable auto-update**.
-3. Start a new session. The puck lights up.
+### Way 2: inside Claude Code (terminal, desktop or VS Code)
 
-This works in the terminal, the desktop app and VS Code on the same computer. Updates arrive
-in the background and apply in your next session (or after `/reload-plugins`).
+1. Type `/plugin marketplace add human-needed/plugins` and press Enter.
+2. Type `/plugin install humanneeded@humanneeded` and press Enter.
+3. Turn on updates: type `/plugin`, open **Marketplaces**, pick **humanneeded**, choose
+   **Enable auto-update**.
+4. Start a new session.
+5. Check: send any message. The puck glows "working", then "done" when Claude stops.
+
+### Way 3: a terminal
+
+1. Run `claude plugin marketplace add human-needed/plugins`
+2. Run `claude plugin install humanneeded@humanneeded`
+3. Start a new Claude Code session.
+4. Check: send any message. The puck glows "working", then "done" when Claude stops.
 
 Ask Claude "test my puck", "mute for an hour" or "make needs purple".
 If you use an HTTP proxy, add `127.0.0.1` to `NO_PROXY`.
 
+## Cowork (Claude cloud tasks)
+
+1. In the HumanNeeded app, turn on the **cloud link**.
+2. In Claude, go to **Customize → Plugins → Add → Add marketplace**.
+3. Enter `human-needed/plugins`, then **Install** humanneeded. (Optional: turn on **Sync automatically**.)
+4. Start a Cowork task.
+5. Check: the puck glows "working" while the task runs, then "done".
+
+In the cloud the plugin's [`cloud/hn-cloud.sh`](plugins/claude/cloud/hn-cloud.sh) sends each state
+through the HumanNeeded relay to the app. On your own computer that script does nothing.
+
 ## Codex
 
-1. In a terminal, run:
+Choose one way. They all do the same thing.
 
-   ```bash
-   codex plugin marketplace add human-needed/plugins
-   ```
+### Way 1: a terminal
 
-   ```bash
-   codex plugin add humanneeded@humanneeded
-   ```
+1. Run `codex plugin marketplace add human-needed/plugins`
+2. Run `codex plugin add humanneeded@humanneeded`
+3. Restart Codex.
+4. Trust the hooks (Codex needs this once): type `/hooks` in Codex, or open **Settings → Hooks** in
+   the Codex app, and trust the HumanNeeded hooks.
+5. Check: send any message. The puck glows "working", then "done".
 
-   Or in Codex type `/plugins` and install **HumanNeeded** once the marketplace is added.
-   (The HumanNeeded app can do this step for you.)
-2. Restart Codex and **trust the hooks**: `/hooks` in the CLI, or **Settings → Hooks** in the
-   app. Codex won't run plugin hooks until you do.
+### Way 2: inside Codex
 
-To update: `codex plugin marketplace upgrade humanneeded`, then trust the changed hooks again.
+1. Run `codex plugin marketplace add human-needed/plugins` once in a terminal.
+2. In Codex, type `/plugins`, find **HumanNeeded** and install it.
+3. Trust the hooks: type `/hooks` (or **Settings → Hooks** in the app) and trust the HumanNeeded hooks.
+4. Check: send any message. The puck glows "working", then "done".
 
-Older setup (a `~/.codex/hooks.json` file with our entries) still works. Remove our entries
-from that file when you switch to the plugin, or the puck gets every event twice.
+To update: run `codex plugin marketplace upgrade humanneeded`, then trust the changed hooks again.
+Set up the old way (our entries in `~/.codex/hooks.json`)? Delete those entries, or the puck
+gets every event twice.
 
 ## Cursor
 
-1. Download our hooks file (these commands never overwrite a file you already have):
+Choose one way. They all do the same thing.
+
+### Way 1: one command
+
+1. Run the command for your computer. It never overwrites a file you already have.
 
    macOS / Linux:
 
@@ -71,18 +95,17 @@ from that file when you switch to the plugin, or the puck gets every event twice
    if (!(Test-Path $HOME\.cursor\hooks.json)) { mkdir -Force $HOME\.cursor | Out-Null; curl.exe -fsSL -o $HOME\.cursor\hooks.json https://raw.githubusercontent.com/human-needed/plugins/main/plugins/cursor/hooks.windows.json }
    ```
 
-   Already have one? Copy the entries of [`hooks.json`](plugins/cursor/hooks.json)
-   (Windows: [`hooks.windows.json`](plugins/cursor/hooks.windows.json)) into it instead.
-2. Done: Cursor picks it up at once. It shows working and done (Cursor has no "needs you" hook).
+2. Check: send a message in Cursor's agent. The puck glows "working", then "done".
 
-Cursor has no auto-update for hooks. To update, delete the file (or our entries) and repeat step 1.
+### Way 2: you already have `~/.cursor/hooks.json`
 
-## Cloud sessions (Claude)
+1. Open [`hooks.json`](plugins/cursor/hooks.json) (Windows:
+   [`hooks.windows.json`](plugins/cursor/hooks.windows.json)).
+2. Copy each entry under `"hooks"` into the same place in your `~/.cursor/hooks.json`. Save.
+3. Check: send a message in Cursor's agent. The puck glows "working", then "done".
 
-Cloud Cowork tasks run your Claude plugins in a cloud machine. There the plugin's
-[`cloud/hn-cloud.sh`](plugins/claude/cloud/hn-cloud.sh) sends each state through the
-HumanNeeded relay to the app (turn on the cloud link in the app). On your own computer that
-script does nothing.
+Cursor shows working and done only (it has no "needs you" hook). It has no auto-update for hooks:
+to update, delete our entries and repeat.
 
 ## Layout
 
