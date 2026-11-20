@@ -121,6 +121,8 @@ async function onWs(event, rc) {
   }
   if (!x) return await refuse(id, 'bad_hello'); // anything before hello closes the socket
   if (t === 'ping') return { statusCode: 200 };
+  // Link check (replaces the PC's self-check POST): this socket is still bound to its K.
+  if (t === 'check') { await postJson(id, { t: 'ok' }); return { statusCode: 200 }; }
   if (t === 'unbind') return await unbind(x, m);
   return { statusCode: 200 }; // unknown message from an authenticated PC: ignore
 }
@@ -174,6 +176,7 @@ async function hello(id, rc, m) {
     db.send(new PutItemCommand({ TableName: T, Item: { pk: S(`c#${k}`), sk: S(id), i: S(i), ttl } })),
     db.send(new PutItemCommand({ TableName: T, Item: { pk: S(`x#${id}`), sk: S('-'), k: S(k), i: S(i), ttl } })),
   ]);
+  await postJson(id, { t: 'ok' }); // bound: states for K now reach this socket
   return { statusCode: 200 };
 }
 
