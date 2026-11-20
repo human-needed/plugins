@@ -87,7 +87,9 @@ Resources:
       Role: !GetAtt RelayRole.Arn
       Timeout: 5
       MemorySize: 256
-      LoggingConfig: { LogGroup: !Ref RelayLogs }
+      # No per-invocation START/END/REPORT lines (they'd cost more than the relay itself at scale);
+      # only errors are logged. Durations and counts come from free CloudWatch metrics.
+      LoggingConfig: { LogGroup: !Ref RelayLogs, LogFormat: JSON, ApplicationLogLevel: ERROR, SystemLogLevel: WARN }
       Environment:
         Variables:
           TABLE: !Ref Table
@@ -356,6 +358,131 @@ Resources:
       Period: 3600
       EvaluationPeriods: 1
       Threshold: 30000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasEmail, [!Ref AlertTopic], []]
+
+  # ---------- auto-brake: traffic far above normal -> throttle both APIs to 3/s ----------
+  BrakeTopic:
+    Type: AWS::SNS::Topic
+    Properties: { KmsMasterKeyId: alias/aws/sns }
+
+  BrakeTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref BrakeTopic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudwatch.amazonaws.com }
+            Action: sns:Publish
+            Resource: !Ref BrakeTopic
+            Condition: { StringEquals: { 'aws:SourceAccount': !Ref AWS::AccountId } }
+
+  BrakeLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { RetentionInDays: 14 }
+
+  BrakeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - { Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: sts:AssumeRole }
+      Policies:
+        - PolicyName: brake
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt BrakeLogs.Arn
+              - Effect: Allow
+                Action: apigateway:PATCH
+                Resource:
+                  - !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis/${HttpApi}/stages/*
+                  - !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis/${WsApi}/stages/*
+
+  BrakeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: hn-relay/1 auto-brake (throttle both APIs on a traffic flood)
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      Handler: brake.handler
+      Code: src/
+      Role: !GetAtt BrakeRole.Arn
+      Timeout: 15
+      MemorySize: 256
+      LoggingConfig: { LogGroup: !Ref BrakeLogs }
+      Environment:
+        Variables: { HTTP_API: !Ref HttpApi, WS_API: !Ref WsApi, BRAKE_RATE: '3', BRAKE_BURST: '6' }
+
+  BrakePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BrakeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref BrakeTopic
+
+  BrakeSubscription:
+    Type: AWS::SNS::Subscription
+    Properties: { TopicArn: !Ref BrakeTopic, Protocol: lambda, Endpoint: !GetAtt BrakeFunction.Arn }
+
+  # 4,500 requests in 5 min = 15/s sustained (normal: well under 3/s at a few thousand users).
+  PostBrakeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: HumanNeeded relay POST flood - AUTO-BRAKE engaged (both APIs throttled to 3/s). See relay/RUNBOOK.md
+      Namespace: AWS/ApiGateway
+      MetricName: Count
+      Dimensions: [{ Name: ApiId, Value: !Ref HttpApi }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 4500
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasEmail, [!Ref BrakeTopic, !Ref AlertTopic], [!Ref BrakeTopic]]
+
+  WsBrakeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: HumanNeeded relay WebSocket flood - AUTO-BRAKE engaged (both APIs throttled to 3/s). See relay/RUNBOOK.md
+      Namespace: AWS/ApiGateway
+      MetricName: MessageCount
+      Dimensions: [{ Name: ApiId, Value: !Ref WsApi }, { Name: Stage, Value: v1 }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 4500
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasEmail, [!Ref BrakeTopic, !Ref AlertTopic], [!Ref BrakeTopic]]
+
+  RelayErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: HumanNeeded relay function errors or throttles (concurrency exhausted)
+      Metrics:
+        - Id: e
+          ReturnData: false
+          MetricStat:
+            Metric: { Namespace: AWS/Lambda, MetricName: Errors, Dimensions: [{ Name: FunctionName, Value: !Ref RelayFunction }] }
+            Period: 900
+            Stat: Sum
+        - Id: t
+          ReturnData: false
+          MetricStat:
+            Metric: { Namespace: AWS/Lambda, MetricName: Throttles, Dimensions: [{ Name: FunctionName, Value: !Ref RelayFunction }] }
+            Period: 900
+            Stat: Sum
+        - { Id: total, Expression: 'FILL(e,0)+FILL(t,0)', Label: errors+throttles, ReturnData: true }
+      EvaluationPeriods: 1
+      Threshold: 20
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: !If [HasEmail, [!Ref AlertTopic], []]
