@@ -15,6 +15,18 @@ P = {  # USD
 MONTH_MIN = 30 * 24 * 60
 
 
+def per_user_check(ping_min, check_min, cloud_posts, post_ms, ws_ms):
+    """No self-check POST: the PC sends {"t":"check"} (Lambda + 1 read + reply) every check_min."""
+    reconnects = MONTH_MIN / 120
+    c = per_user(ping_min, 10 ** 12, cloud_posts, post_ms, ws_ms)
+    checks = MONTH_MIN / check_min
+    lam = checks * (P["lambda_req"] + ws_ms / 1000 * P["mem_gb"] * P["lambda_gbs"])
+    c["ws messages (check + ok, hello ok)"] = (2 * checks + reconnects) * P["ws_msg"]
+    c["lambda (check)"] = lam
+    c["dynamodb (check: 1 read)"] = checks * 0.5 * P["rru"]
+    return c
+
+
 def per_user(ping_min, probe_min, cloud_posts, post_ms, ws_ms, online=1.0):
     """probe_min=None: one self-check per connect. online: share of the month the socket is open."""
     mins = MONTH_MIN * online
@@ -50,6 +62,8 @@ if __name__ == "__main__":
     a.add_argument("--cloud-posts", type=float, default=3000, help="per user/month (1 h/day, 45 s heartbeat + state changes)")
     o = a.parse_args()
     show("Contract today (ping 4 min, self-check 3 min)", per_user(4, 3, o.cloud_posts, o.post_ms, o.ws_ms))
+    show("Chosen 11-20: ping 9 min, no self-check POST, check/ok every 30 min",
+         per_user_check(9, 30, o.cloud_posts, o.post_ms, o.ws_ms))
     show("Proposed (ping 9 min, self-check 30 min)", per_user(9, 30, o.cloud_posts, o.post_ms, o.ws_ms))
     show("Proposed + socket only while the Claude desktop app runs (8 h/day), self-check once per connect",
          per_user(9, None, o.cloud_posts, o.post_ms, o.ws_ms, online=8 / 24))

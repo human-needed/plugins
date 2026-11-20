@@ -106,6 +106,11 @@ async def main():
 
     # §3 hello + forwarding, exact message shape, hb flag.
     a = await Pc(k).connect()
+    m = await a.recv()
+    check("hello answered {t:ok}", m == {"t": "ok"}, str(m))
+    await a.ws.send(json.dumps({"t": "check"}))
+    m = await a.recv()
+    check("check answered {t:ok}", m == {"t": "ok"}, str(m))
     s1 = state("needs")
     post(k, s1)
     m = await wait_for_state(a, s1["h"])
@@ -144,7 +149,7 @@ async def main():
 
     # Message before hello -> closed.
     early = await Pc(k).connect(hello=False)
-    await early.ws.send(json.dumps({"t": "unbind", "i": rnd(32)}))
+    await early.ws.send(json.dumps({"t": "check"}))
     check("message before hello closes socket", await early.closed())
 
     # Hello later than 5 s -> refused.
