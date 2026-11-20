@@ -101,17 +101,53 @@
         "marker": "127.0.0.1:24816/v1/event/codex/"
       },
       "install": {
-        "hooks_json_merge": "~/.codex/hooks.json",
-        "from": "plugins/codex/hooks.json",
-        "format": "codex",
-        "after": "Codex runs new hooks only after the user trusts them: tell the user to open Codex and approve them (CLI: /hooks; app: Settings > Hooks or the 'Review hooks' prompt). Can't be automated (trust is per hook hash)."
+        "preferred": {
+          "run": [
+            [
+              "codex",
+              "plugin",
+              "marketplace",
+              "add",
+              "human-needed/plugins"
+            ],
+            [
+              "codex",
+              "plugin",
+              "add",
+              "humanneeded@humanneeded"
+            ]
+          ],
+          "after": "Codex runs plugin hooks only after the user trusts them: in Codex type /hooks (CLI) or open Settings > Hooks (app) and trust the HumanNeeded hooks. Cannot be automated (trust is per hook hash).",
+          "note": "`codex` may only exist inside the Codex app (WindowsApps/OpenAI.Codex_*/app/resources/codex.exe on Windows); use that path when it is not on PATH."
+        },
+        "fallback": {
+          "hooks_json_merge": "~/.codex/hooks.json",
+          "from": "plugins/codex/hooks.json",
+          "format": "codex",
+          "after": "Codex runs new hooks only after the user trusts them: tell the user to open Codex and approve them (CLI: /hooks; app: Settings > Hooks or the 'Review hooks' prompt). Can't be automated (trust is per hook hash)."
+        }
       },
       "remove": {
-        "hooks_json_remove": "~/.codex/hooks.json",
-        "marker": "127.0.0.1:24816/v1/event/codex/"
+        "run": [
+          [
+            "codex",
+            "plugin",
+            "remove",
+            "humanneeded@humanneeded"
+          ]
+        ],
+        "fallback": {
+          "hooks_json_remove": "~/.codex/hooks.json",
+          "marker": "127.0.0.1:24816/v1/event/codex/"
+        }
       },
-      "manual": "Copy the entries of plugins/codex/hooks.json (github.com/human-needed/plugins) into ~/.codex/hooks.json (create it if missing), restart Codex, then approve the hooks in /hooks (CLI) or Settings > Hooks (app).",
-      "restart_needed": "new sessions; hooks must be trusted"
+      "manual": "In a terminal: codex plugin marketplace add human-needed/plugins, then codex plugin add humanneeded@humanneeded. Then in Codex trust the hooks: /hooks (CLI) or Settings > Hooks (app).",
+      "restart_needed": "new sessions; hooks must be trusted",
+      "installed_plugin": {
+        "toml": "~/.codex/config.toml",
+        "table": "plugins.\"humanneeded@humanneeded\"",
+        "note": "Installed as a Codex plugin (2.0.0+). Either this or the old hooks_json marker means installed. NEW: WS-APP2 to adopt."
+      }
     },
     "cursor": {
       "name": "Cursor",

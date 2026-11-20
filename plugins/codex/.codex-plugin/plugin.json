@@ -1,0 +1,19 @@
+{
+  "name": "humanneeded",
+  "version": "2.0.0",
+  "description": "Lights the HumanNeeded desk puck when Codex is working, done, or needs you. Needs the HumanNeeded app (human-needed.com).",
+  "author": {
+    "name": "HumanNeeded",
+    "url": "https://human-needed.com"
+  },
+  "homepage": "https://human-needed.com/start/",
+  "repository": "https://github.com/human-needed/plugins",
+  "hooks": "./hooks.json",
+  "interface": {
+    "displayName": "HumanNeeded",
+    "shortDescription": "Desk puck lights up when Codex needs you",
+    "developerName": "HumanNeeded",
+    "category": "Productivity",
+    "websiteURL": "https://human-needed.com"
+  }
+}

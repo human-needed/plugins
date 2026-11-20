@@ -117,6 +117,15 @@ const plugin = readJson("plugins/claude/.claude-plugin/plugin.json");
 ok(plugin.name === "humanneeded" && /^2\./.test(plugin.version), "claude plugin.json name/version 2.x");
 const mkt = readJson(".claude-plugin/marketplace.json");
 ok(mkt.plugins.length === 1 && mkt.plugins[0].source === "./plugins/claude", "marketplace lists one Claude plugin");
+// Codex plugin: `codex plugin marketplace add human-needed/plugins` reads .agents/plugins/marketplace.json.
+const cmkt = readJson(".agents/plugins/marketplace.json");
+ok(cmkt.name === "humanneeded" && cmkt.plugins.length === 1 && cmkt.plugins[0].name === "humanneeded"
+  && cmkt.plugins[0].source?.source === "local" && cmkt.plugins[0].source?.path === "./plugins/codex",
+  "codex marketplace lists humanneeded -> ./plugins/codex");
+const cplug = readJson("plugins/codex/.codex-plugin/plugin.json");
+ok(cplug.name === "humanneeded" && /^\d+\.\d+\.\d+/.test(cplug.version) && cplug.hooks === "./hooks.json",
+  "codex plugin.json name/version, hooks -> ./hooks.json");
+ok(Object.keys(readJson("plugins/codex/hooks.json").hooks).length >= 4, "codex plugin hooks file present");
 const manifest = readJson("integrations/manifest.json");
 ok(eq(Object.keys(manifest.agents).sort(), ["claude", "codex", "cursor"]), "integrations/manifest.json has 3 agents");
 
