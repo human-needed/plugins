@@ -3,10 +3,14 @@
 Spec: `pm/contracts/relay-api.md` (in the AgentAlarm project). One CloudFormation stack, `hn-relay-v1`, us-east-2:
 
 - `POST https://relay.human-needed.com/v1/h/<K>` (API Gateway HTTP API) — cloud hooks. Always `202`, empty
-  body; `429` over 10 POSTs per K per 5 s. Invalid bodies are dropped silently.
-- `wss://relay-ws.human-needed.com/v1` (API Gateway WebSocket API) — PC app: `hello` within 5 s, `ping`, `unbind`.
+  body; `429` over 2/s burst 10 per K, or 10/s burst 50 per IP. Invalid bodies are dropped silently.
+- `wss://relay-ws.human-needed.com/v1` (API Gateway WebSocket API) — PC app: `hello` within 5 s, `ping`
+  (answered by API Gateway, no Lambda), `unbind`. Connects: 10/min burst 20 per IP. Messages ≤ 1 KB.
   Up to 3 installs own a K (30 days after last connect); the relay keeps only `sha256(S)`.
-- One Lambda (`src/relay.mjs`) for both; one DynamoDB table (bindings, live connection ids, rate counters; all TTL).
+- One Lambda (`src/relay.mjs`, limits in `src/limits.mjs`) for both; rate limits are in-memory token buckets per
+  warm instance. One DynamoDB table (bindings, live connection ids; TTL). Both APIs capped at 20/s, burst 40.
+- Auto-brake (`src/brake.mjs`): > 4,500 requests in 5 min on either API throttles both to 3/s. Ops and
+  incidents: `RUNBOOK.md`, `ops/relay-ops.sh`. Cost model: `tests/cost_model.py`; load test: `tests/load_test.py`.
 - Probe (`src/probe.mjs`) every 15 min: hello + POST + receive through the public names; alarm emails on failure
   or if it stops running. Budget alerts at $5 and $20. Logs 14 days, never contain keys.
 - DNS (Cloudflare, DNS only): `relay` → `PostDomainTarget`, `relay-ws` → `WsDomainTarget` (stack outputs),

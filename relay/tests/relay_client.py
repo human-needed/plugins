@@ -144,13 +144,19 @@ async def main():
 
     # Message before hello -> closed.
     early = await Pc(k).connect(hello=False)
-    await early.ws.send(json.dumps({"t": "ping"}))
+    await early.ws.send(json.dumps({"t": "unbind", "i": rnd(32)}))
     check("message before hello closes socket", await early.closed())
 
     # Hello later than 5 s -> refused.
     late = await Pc(k).connect(delay=6.0)
     m = await late.recv()
     check("hello after 5 s refused", m is not None and m.get("t") == "err", str(m))
+
+    # Oversized WebSocket message -> refused.
+    big = await Pc(k).connect(hello=False)
+    await big.ws.send(json.dumps({"t": "hello", "k": k, "i": rnd(32), "s": rnd(64), "pad": "x" * 2000}))
+    m = await big.recv()
+    check("WebSocket message > 1 KB refused", m is not None and m.get("t") == "err", str(m))
 
     # Malformed hello -> refused.
     bad = await websockets.connect(ARGS.ws, open_timeout=10)
@@ -186,7 +192,16 @@ async def main():
 
     # §4 rate limit per K: 2/s burst 10 -> a burst of 25 sees 429s; normal heartbeat cadence never does.
     kr = rnd(32)
-    codes = [post(kr, state())[0] for _ in range(25)]
+    # One keep-alive connection, back to back (the limit is per warm Lambda instance; a fully parallel
+    # burst spreads over instances, bounded overall by the stage throttle).
+    import http.client, urllib.parse
+    u = urllib.parse.urlparse(ARGS.post)
+    conn = http.client.HTTPSConnection(u.netloc, timeout=10)
+    codes = []
+    for _ in range(25):
+        conn.request("POST", f"/v1/h/{kr}", json.dumps(state()), {"content-type": "application/json"})
+        r = conn.getresponse(); r.read(); codes.append(r.status)
+    conn.close()
     check("burst over limit gets 429", codes.count(429) >= 5 and all(c in (202, 429) for c in codes), str(codes))
     check("first 10 of a burst accepted", codes[:10].count(202) >= 10 or codes.count(202) >= 10, str(codes))
 
