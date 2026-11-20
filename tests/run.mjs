@@ -242,7 +242,7 @@ const acct = "11111111-2222-3333-4444-555555555555";
 writeFileSync(join(home, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: acct } }));
 const K = sha("humanneeded-account:" + acct).slice(0, 32);
 const cdir = join(home, "hn-cloud");
-const cenv = { ...process.env, HOME: home, CLAUDE_CODE_REMOTE: "true", HN_RELAY_URL: `http://127.0.0.1:${port}/v1/h/`,
+const cenv = { ...process.env, CLAUDE_CODE_ACCOUNT_UUID: "", HOME: home, CLAUDE_CODE_REMOTE: "true", HN_RELAY_URL: `http://127.0.0.1:${port}/v1/h/`,
                HN_HB_INTERVAL: "1", HN_CLOUD_DIR: cdir, HN_DEV: "1" };
 
 // Run the hook like Claude would: `sh hn-cloud.sh <state>` with hook JSON on stdin.
@@ -288,6 +288,10 @@ const h = (sid) => sha(sid).slice(0, 16);
   const r = await runCloud("done", "s-nodev", { ...noDev, HOME: noAcct, HN_CLOUD_DIR: odir });
   await sleep(300);
   ok(r.code === 0 && r.out === "" && posts.length === 0 && !existsSync(odir), "overrides ignored without HN_DEV=1");
+  posts.length = 0;
+  const r5 = await runCloud("done", "s-env", { ...cenv, HOME: noAcct, CLAUDE_CODE_ACCOUNT_UUID: acct });
+  ok(r5.code === 0 && posts.find((p) => !p.body.hb && p.body.h === h("s-env"))?.path.endsWith("/" + K),
+     "Cowork: account from CLAUDE_CODE_ACCOUNT_UUID, same key", JSON.stringify(posts));
   rmSync(noAcct, { recursive: true, force: true });
 }
 {
