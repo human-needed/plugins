@@ -329,19 +329,20 @@ Resources:
       AlarmActions: !If [HasEmail, [!Ref AlertTopic], []]
       OKActions: !If [HasEmail, [!Ref AlertTopic], []]
 
-  # Traffic alarms: email long before the budget notices (budget data lags up to a day).
-  # 30k requests/hour ~ 8/s sustained, far above a few hundred users' normal load.
+  # Early warning (D-066): 70 % of the 20/s POST ceiling as a 1-hour average = 14/s, about 2,100 active users
+  # at relay-api §3.4 rates (per user: 0.0067 POST/s; 0.011 WebSocket messages/s in+out). Time to revisit.
+  # Budget data lags up to a day; these come first.
   PostTrafficAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmDescription: HumanNeeded relay POST traffic unusually high (possible abuse)
+      AlarmDescription: HumanNeeded relay EARLY WARNING - POST traffic at 70% of the 20/s ceiling (~2,100 users, or abuse). See relay/RUNBOOK.md
       Namespace: AWS/ApiGateway
       MetricName: Count
       Dimensions: [{ Name: ApiId, Value: !Ref HttpApi }]
       Statistic: Sum
       Period: 3600
       EvaluationPeriods: 1
-      Threshold: 30000
+      Threshold: 50400
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: !If [HasEmail, [!Ref AlertTopic], []]
@@ -349,14 +350,14 @@ Resources:
   WsTrafficAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmDescription: HumanNeeded relay WebSocket traffic unusually high (possible abuse)
+      AlarmDescription: HumanNeeded relay EARLY WARNING - WebSocket messages at the ~2,100-user level (or abuse). See relay/RUNBOOK.md
       Namespace: AWS/ApiGateway
       MetricName: MessageCount
       Dimensions: [{ Name: ApiId, Value: !Ref WsApi }, { Name: Stage, Value: v1 }]
       Statistic: Sum
       Period: 3600
       EvaluationPeriods: 1
-      Threshold: 30000
+      Threshold: 83000
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: !If [HasEmail, [!Ref AlertTopic], []]
@@ -432,7 +433,8 @@ Resources:
     Type: AWS::SNS::Subscription
     Properties: { TopicArn: !Ref BrakeTopic, Protocol: lambda, Endpoint: !GetAtt BrakeFunction.Arn }
 
-  # 4,500 requests in 5 min = 15/s sustained (normal: well under 3/s at a few thousand users).
+  # Brake: POST 5,400 in 5 min = 18/s (90 % of the ceiling, ~2,700 users); WebSocket 13,200 messages in 5 min
+  # = 44/s in+out (~4,000 users). Above the early warning, so organic growth warns before it brakes.
   PostBrakeAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -443,7 +445,7 @@ Resources:
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
-      Threshold: 4500
+      Threshold: 5400
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: !If [HasEmail, [!Ref BrakeTopic, !Ref AlertTopic], [!Ref BrakeTopic]]
@@ -458,7 +460,7 @@ Resources:
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
-      Threshold: 4500
+      Threshold: 13200
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: !If [HasEmail, [!Ref BrakeTopic, !Ref AlertTopic], [!Ref BrakeTopic]]
