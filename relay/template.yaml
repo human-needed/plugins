@@ -329,13 +329,14 @@ Resources:
       AlarmActions: !If [HasEmail, [!Ref AlertTopic], []]
       OKActions: !If [HasEmail, [!Ref AlertTopic], []]
 
-  # Early warning (D-066): 70 % of the 20/s POST ceiling as a 1-hour average = 14/s, about 2,100 active users
-  # at relay-api §3.4 rates (per user: 0.0067 POST/s; 0.011 WebSocket messages/s in+out). Time to revisit.
-  # Budget data lags up to a day; these come first.
+  # Each API: early warning at 70 % of its 20/s ceiling (1-h average), brake at 90 % (5 min). Rate-based, so it
+  # holds for any mix of old and new apps. relay-api 1.1 per active user: 0.00116 POST/s; WebSocket inbound
+  # 0.00255/s (the 20/s throttle counts inbound), in+out 0.0044/s (MessageCount counts both directions;
+  # in+out / in = 1.73 for app >= beta.22, 2.55 for older apps). Budget data lags up to a day; these come first.
   PostTrafficAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmDescription: HumanNeeded relay EARLY WARNING - POST traffic at 70% of the 20/s ceiling (~2,100 users, or abuse). See relay/RUNBOOK.md
+      AlarmDescription: HumanNeeded relay EARLY WARNING - POST at 70% of the 20/s ceiling (~12,000 users at relay-api 1.1, or abuse). See relay/RUNBOOK.md
       Namespace: AWS/ApiGateway
       MetricName: Count
       Dimensions: [{ Name: ApiId, Value: !Ref HttpApi }]
@@ -350,14 +351,14 @@ Resources:
   WsTrafficAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmDescription: HumanNeeded relay EARLY WARNING - WebSocket messages at the ~2,100-user level (or abuse). See relay/RUNBOOK.md
+      AlarmDescription: HumanNeeded relay EARLY WARNING - WebSocket inbound at ~70% of the 20/s ceiling (~5,500 users at relay-api 1.1, or abuse). See relay/RUNBOOK.md
       Namespace: AWS/ApiGateway
       MetricName: MessageCount
       Dimensions: [{ Name: ApiId, Value: !Ref WsApi }, { Name: Stage, Value: v1 }]
       Statistic: Sum
       Period: 3600
       EvaluationPeriods: 1
-      Threshold: 83000
+      Threshold: 87000  # 14/s inbound x 1.73 = 24/s in+out; fires earlier (~47 %) while old apps remain
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: !If [HasEmail, [!Ref AlertTopic], []]
@@ -433,8 +434,8 @@ Resources:
     Type: AWS::SNS::Subscription
     Properties: { TopicArn: !Ref BrakeTopic, Protocol: lambda, Endpoint: !GetAtt BrakeFunction.Arn }
 
-  # Brake: POST 5,400 in 5 min = 18/s (90 % of the ceiling, ~2,700 users); WebSocket 13,200 messages in 5 min
-  # = 44/s in+out (~4,000 users). Above the early warning, so organic growth warns before it brakes.
+  # Brake at 90 % of each ceiling for 5 min: POST 18/s; WebSocket 18/s inbound x 2.55 (old-app ratio, so mixed
+  # traffic never trips it) = 46/s in+out. Legit growth hits the early warning long before.
   PostBrakeAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -460,7 +461,7 @@ Resources:
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
-      Threshold: 13200
+      Threshold: 13800
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: !If [HasEmail, [!Ref BrakeTopic, !Ref AlertTopic], [!Ref BrakeTopic]]

@@ -9,8 +9,8 @@ Spec: `pm/contracts/relay-api.md` (in the AgentAlarm project). One CloudFormatio
   Up to 3 installs own a K (30 days after last connect); the relay keeps only `sha256(S)`.
 - One Lambda (`src/relay.mjs`, limits in `src/limits.mjs`) for both; rate limits are in-memory token buckets per
   warm instance. One DynamoDB table (bindings, live connection ids; TTL). Both APIs capped at 20/s, burst 40.
-- Auto-brake (`src/brake.mjs`): POST > 18/s or WebSocket > 44/s for 5 min throttles both to 3/s;
-  early-warning email at 70 % of the ceiling (~2,100 users). Ops and
+- Auto-brake (`src/brake.mjs`): POST > 18/s or WebSocket > 46/s (in+out) for 5 min throttles both to 3/s;
+  early-warning email at 70 % of each ceiling (WebSocket ≈ 5,500 users, POST ≈ 12,000 at relay-api 1.1). Ops and
   incidents: `RUNBOOK.md`, `ops/relay-ops.sh`. Cost model: `tests/cost_model.py`; load test: `tests/load_test.py`.
 - Probe (`src/probe.mjs`) every 15 min: hello + POST + receive through the public names; alarm emails on failure
   or if it stops running. Budget alerts at $5 and $20. Logs 14 days, never contain keys.
