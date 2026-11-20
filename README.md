@@ -35,27 +35,25 @@ If you use an HTTP proxy, add `127.0.0.1` to `NO_PROXY`.
 
 ## Codex
 
-1. Download our hooks file (these commands never overwrite a file you already have):
-
-   macOS / Linux:
+1. In a terminal, run:
 
    ```bash
-   [ -e ~/.codex/hooks.json ] || { mkdir -p ~/.codex && curl -fsSL -o ~/.codex/hooks.json https://raw.githubusercontent.com/human-needed/plugins/main/plugins/codex/hooks.json; }
+   codex plugin marketplace add human-needed/plugins
    ```
 
-   Windows (PowerShell):
-
-   ```powershell
-   if (!(Test-Path $HOME\.codex\hooks.json)) { mkdir -Force $HOME\.codex | Out-Null; curl.exe -fsSL -o $HOME\.codex\hooks.json https://raw.githubusercontent.com/human-needed/plugins/main/plugins/codex/hooks.json }
+   ```bash
+   codex plugin add humanneeded@humanneeded
    ```
 
-   Already have one? Copy the entries of [`plugins/codex/hooks.json`](plugins/codex/hooks.json)
-   into it instead.
-2. Restart Codex and **approve the hooks**: `/hooks` in the CLI, or **Settings → Hooks** in the
-   app. Codex won't run them until you do.
+   Or in Codex type `/plugins` and install **HumanNeeded** once the marketplace is added.
+   (The HumanNeeded app can do this step for you.)
+2. Restart Codex and **trust the hooks**: `/hooks` in the CLI, or **Settings → Hooks** in the
+   app. Codex won't run plugin hooks until you do.
 
-Codex has no auto-update for hooks. To update, delete the file (or our entries), repeat both
-steps, and approve the changed hooks again.
+To update: `codex plugin marketplace upgrade humanneeded`, then trust the changed hooks again.
+
+Older setup (a `~/.codex/hooks.json` file with our entries) still works. Remove our entries
+from that file when you switch to the plugin, or the puck gets every event twice.
 
 ## Cursor
 
@@ -91,7 +89,8 @@ script does nothing.
 ```
 .claude-plugin/marketplace.json   Claude Code marketplace (this repo)
 plugins/claude/                   Claude Code plugin "humanneeded": HTTP hooks, cloud hook, skill
-plugins/codex/hooks.json          Codex hooks (curl)
+plugins/codex/                    Codex plugin "humanneeded" (.codex-plugin/, hooks.json: curl)
+.agents/plugins/marketplace.json  Codex marketplace (this repo)
 plugins/cursor/hooks*.json        Cursor hooks (curl; macOS/Linux and Windows)
 integrations/manifest.json        how the app detects each installed integration
 tools/gen-hooks.mjs               generates every hook file from one mapping table
