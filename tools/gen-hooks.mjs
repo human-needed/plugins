@@ -28,7 +28,12 @@ export const MAPPING = {
     ["UserPromptSubmit", null, "working"],
     ["PostToolUse", "*", "working"],
     ["PermissionRequest", "*", "needs"],
+    // Network/sandbox requests from the agent (code mode's tools.request_permissions) never fire
+    // PermissionRequest; PostToolUse sets working again once answered (app-events 2.2, FAIL-3).
+    ["PreToolUse", "request_permissions", "needs"],
     ["Stop", null, "done"],
+    // The Stop button: Stop doesn't fire on an interrupt (app-events 2.2, FAIL-4).
+    ["Interrupt", null, "idle"],
     ["SessionEnd", null, "end"],
   ],
   cursor: [
@@ -72,13 +77,14 @@ function claude() {
 }
 
 // Codex: ~/.codex/hooks.json. `command` for macOS/Linux, `commandWindows` for Windows.
-// SessionEnd is always synchronous in Codex (max 3 s), so no async there.
+// SessionEnd is always synchronous in Codex (max 3 s), so no async there; Interrupt too (it runs
+// as the turn is torn down, timeout max 3 s), so the post isn't dropped with the turn.
 function codex() {
   const hooks = {};
   for (const [ev, matcher, state] of MAPPING.codex) {
     const h = { type: "command", command: curlPosix("codex", state), commandWindows: curlWindows("codex", state),
                 timeout: 3 };
-    if (ev !== "SessionEnd") h.async = true;
+    if (ev !== "SessionEnd" && ev !== "Interrupt") h.async = true;
     const group = {};
     if (matcher) group.matcher = matcher;
     group.hooks = [h];

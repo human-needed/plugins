@@ -31,10 +31,11 @@ const CONTRACT = {
   claude: { UserPromptSubmit: ["working"], PostToolUse: ["working"], Notification: ["needs"],
             PermissionRequest: ["needs"], PreToolUse: ["needs"], Stop: ["done"], SessionEnd: ["end"] },
   codex:  { UserPromptSubmit: ["working"], PostToolUse: ["working"], PermissionRequest: ["needs"],
-            Stop: ["done"], SessionEnd: ["end"] },
+            PreToolUse: ["needs"], Stop: ["done"], Interrupt: ["idle"], SessionEnd: ["end"] },
   cursor: { beforeSubmitPrompt: ["working"], stop: ["done"], sessionEnd: ["end"] },
 };
-const MATCHERS = { "claude:Notification": "permission_prompt|idle_prompt", "claude:PreToolUse": "AskUserQuestion|mcp__computer-use__request_access|mcp__computer-use__request_teach_access" };
+const MATCHERS = { "claude:Notification": "permission_prompt|idle_prompt", "claude:PreToolUse": "AskUserQuestion|mcp__computer-use__request_access|mcp__computer-use__request_teach_access",
+  "codex:PreToolUse": "request_permissions" };
 const expectArgs = (agent, state) => ["event", "--agent", agent, "--state", state, "--stdin-json"];
 
 // ---------------------------------------------------------------------------------------------
@@ -90,7 +91,8 @@ for (const [agent, rels] of Object.entries(FILES)) {
         }
         if (agent === "codex") {
           ok(e.h.command && e.h.commandWindows?.startsWith("curl.exe "), `codex ${e.ev}: command + commandWindows`);
-          ok(e.ev === "SessionEnd" ? !e.h.async && e.h.timeout <= 3 : e.h.async === true, `codex ${e.ev}: async (SessionEnd sync, <= 3 s)`);
+          ok(["SessionEnd", "Interrupt"].includes(e.ev) ? !e.h.async && e.h.timeout <= 3 : e.h.async === true,
+             `codex ${e.ev}: async (SessionEnd, Interrupt sync, <= 3 s)`);
         }
         if (agent === "cursor") ok(rel.endsWith("windows.json") === e.h.command.startsWith("curl.exe "), `${rel} ${e.ev}: OS form`);
       }
