@@ -128,6 +128,17 @@ ok(cplug.name === "humanneeded" && /^\d+\.\d+\.\d+/.test(cplug.version) && cplug
 ok(Object.keys(readJson("plugins/codex/hooks.json").hooks).length >= 4, "codex plugin hooks file present");
 const manifest = readJson("integrations/manifest.json");
 ok(eq(Object.keys(manifest.agents).sort(), ["claude", "codex", "cursor"]), "integrations/manifest.json has 3 agents");
+{ // Claude desktop app installs land in <config>/Claude/rpm/<account>/<org>/plugin_*/skills/humanneeded.
+  const also = manifest.agents.claude.installed_also?.any ?? [];
+  const re = (g) => new RegExp("^" + g.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]+") + "$");
+  const win = also.find((d) => d.os === "windows"), mac = also.find((d) => d.os === "macos");
+  ok(win && re(win.glob).test("%APPDATA%/Claude/rpm/acc-1/org-2/plugin_01FWie6gKxQTQB5PTVNQSEgj/skills/humanneeded"),
+    "claude detects desktop-app install (Windows %APPDATA%/Claude/rpm)");
+  ok(mac && re(mac.glob).test("~/Library/Application Support/Claude/rpm/acc-1/org-2/plugin_x/skills/humanneeded"),
+    "claude detects desktop-app install (macOS Application Support/Claude/rpm)");
+  ok(win && !re(win.glob).test("%APPDATA%/Claude/rpm/acc-1/plugin_x/skills/humanneeded"),
+    "desktop-app detection needs both account and org levels");
+}
 
 // ---------------------------------------------------------------------------------------------
 console.log("2. curl hooks against a stand-in hub (Codex, Cursor)");
