@@ -1,15 +1,15 @@
 {
   "name": "humanneeded",
   "owner": {
-    "name": "HumanNeeded",
+    "name": "HUMAN_NEEDED",
     "url": "https://human-needed.com"
   },
-  "description": "Plugins that connect AI coding agents to the HumanNeeded desk puck.",
+  "description": "HUMAN_NEEDED plugins for Claude, Codex and Cursor. https://human-needed.com",
   "plugins": [
     {
       "name": "humanneeded",
       "source": "./plugins/claude",
-      "description": "Lights the HumanNeeded puck when Claude is working, done, or needs you (Windows, macOS, Linux; cloud sessions via the relay). Needs the HumanNeeded app."
+      "description": "Shows when Claude is working, done, or needs you: a glow on your screen edge, a sound, and the optional Puck. Needs the free HumanNeeded app: https://human-needed.com"
     }
   ]
 }

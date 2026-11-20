@@ -1,11 +1,13 @@
 {
   "name": "humanneeded",
-  "version": "2.0.1",
-  "description": "Lights the HumanNeeded desk puck when Claude is working, done, or needs you. Needs the HumanNeeded app (human-needed.com).",
+  "displayName": "HUMAN_NEEDED",
+  "version": "2.0.2",
+  "description": "Shows when Claude is working, done, or needs you: a glow on your screen edge, a sound, and the optional Puck. Needs the free HumanNeeded app: https://human-needed.com",
   "author": {
-    "name": "HumanNeeded",
+    "name": "HUMAN_NEEDED",
     "url": "https://human-needed.com"
   },
   "homepage": "https://human-needed.com/start/",
-  "repository": "https://github.com/human-needed/plugins"
+  "repository": "https://github.com/human-needed/plugins",
+  "icon": "./assets/icon.png"
 }
