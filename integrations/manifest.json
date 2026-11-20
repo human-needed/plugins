@@ -28,6 +28,19 @@
         "pointer": "/enabledPlugins/humanneeded@humanneeded",
         "equals": true
       },
+      "installed_also": {
+        "any": [
+          {
+            "glob": "%APPDATA%/Claude/rpm/*/*/plugin_*/skills/humanneeded",
+            "os": "windows"
+          },
+          {
+            "glob": "~/Library/Application Support/Claude/rpm/*/*/plugin_*/skills/humanneeded",
+            "os": "macos"
+          }
+        ],
+        "note": "Installed through the Claude desktop app (Customize > Plugins): it lives under <config>/Claude/rpm/<account>/<org>/plugin_*/ and is not in ~/.claude/settings.json. Installed = `installed` OR any of these exists. App beta.23 checks this."
+      },
       "install": {
         "preferred": {
           "run": [
