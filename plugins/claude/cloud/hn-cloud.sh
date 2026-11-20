@@ -7,7 +7,7 @@
 # cloud Cowork tasks (CLAUDE_CODE_ENTRYPOINT=remote_cowork). Anywhere else it exits at once: on
 # a PC the plugin's HTTP hooks report to the HumanNeeded app instead. POSTs
 #   {"v":1,"s":state,"h":sha256(session_id)[:16],"ts":ms,"hb":false}
-# to RELAY_POST<K>, K = sha256("humanneeded-account:" + accountUuid from ~/.claude.json)[:32].
+# to RELAY_POST<K>, K = sha256("humanneeded-account:" + accountUuid from $CLAUDE_CODE_ACCOUNT_UUID or ~/.claude.json)[:32].
 # While the session is working/needs, one detached loop per session re-posts the current state
 # with "hb":true every 45 s while the Claude process is alive.
 # Prints nothing, always exits 0, within 4 s. Log: /tmp/hn-cloud/log (no key in it).
@@ -47,8 +47,11 @@ now_ms() {
   case "$ms" in *N|"" ) echo "$(date +%s)000" ;; *) echo "$ms" ;; esac
 }
 
+# Account: $CLAUDE_CODE_ACCOUNT_UUID first (Cowork VMs set it; their ~/.claude.json has no
+# accountUuid), else ~/.claude.json. Same K either way.
 relay_key() {
-  acct="$(grep -o '"accountUuid" *: *"[0-9a-fA-F-]*"' "$HOME/.claude.json" 2>/dev/null | head -1 | sed 's/.*"\([0-9a-fA-F-]*\)"$/\1/')"
+  acct="$(printf '%s' "${CLAUDE_CODE_ACCOUNT_UUID:-}" | tr -cd '0-9a-fA-F-')"
+  [ -n "$acct" ] || acct="$(grep -o '"accountUuid" *: *"[0-9a-fA-F-]*"' "$HOME/.claude.json" 2>/dev/null | head -1 | sed 's/.*"\([0-9a-fA-F-]*\)"$/\1/')"
   [ -n "$acct" ] || return 1
   printf '%s' "humanneeded-account:$acct" | sha256_hex | cut -c1-32
 }

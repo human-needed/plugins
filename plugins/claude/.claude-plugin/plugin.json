@@ -1,6 +1,6 @@
 {
   "name": "humanneeded",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Lights the HumanNeeded desk puck when Claude is working, done, or needs you. Needs the HumanNeeded app (human-needed.com).",
   "author": {
     "name": "HumanNeeded",
