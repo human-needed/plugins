@@ -70,7 +70,7 @@ Resources:
                 Action: [logs:CreateLogStream, logs:PutLogEvents]
                 Resource: !GetAtt RelayLogs.Arn
               - Effect: Allow
-                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:DeleteItem, dynamodb:Query, dynamodb:UpdateItem]
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:DeleteItem, dynamodb:Query]
                 Resource: !GetAtt Table.Arn
               - Effect: Allow
                 Action: execute-api:ManageConnections
@@ -119,8 +119,8 @@ Resources:
       ApiId: !Ref HttpApi
       StageName: $default
       AutoDeploy: true
-      # Global cap on the whole POST side (abuse/cost guard). Per-K limits are in the function.
-      DefaultRouteSettings: { ThrottlingBurstLimit: 50, ThrottlingRateLimit: 25 }
+      # Global cap on the whole POST side (abuse/cost guard). Per-K and per-IP limits are in the function.
+      DefaultRouteSettings: { ThrottlingBurstLimit: 40, ThrottlingRateLimit: 20 }
 
   HttpInvokePermission:
     Type: AWS::Lambda::Permission
@@ -155,9 +155,22 @@ Resources:
     Type: AWS::ApiGatewayV2::Route
     Properties: { ApiId: !Ref WsApi, RouteKey: $default, Target: !Sub 'integrations/${WsIntegration}' }
 
-  WsDeployment:
+  # {"t":"ping"} is answered by API Gateway itself (no Lambda, no table read): keeps the socket
+  # alive for the price of the message only.
+  WsPingIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WsApi
+      IntegrationType: MOCK
+      TemplateSelectionExpression: \$default
+      RequestTemplates: { $default: '{"statusCode":200}' }
+  WsPingRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties: { ApiId: !Ref WsApi, RouteKey: ping, Target: !Sub 'integrations/${WsPingIntegration}' }
+
+  WsDeploymentV2:
     Type: AWS::ApiGatewayV2::Deployment
-    DependsOn: [WsConnectRoute, WsDisconnectRoute, WsDefaultRoute]
+    DependsOn: [WsConnectRoute, WsDisconnectRoute, WsDefaultRoute, WsPingRoute]
     Properties: { ApiId: !Ref WsApi }
 
   WsStage:
@@ -165,8 +178,8 @@ Resources:
     Properties:
       ApiId: !Ref WsApi
       StageName: v1
-      DeploymentId: !Ref WsDeployment
-      DefaultRouteSettings: { ThrottlingBurstLimit: 50, ThrottlingRateLimit: 25 }
+      DeploymentId: !Ref WsDeploymentV2
+      DefaultRouteSettings: { ThrottlingBurstLimit: 40, ThrottlingRateLimit: 20 }
 
   WsInvokePermission:
     Type: AWS::Lambda::Permission
@@ -314,6 +327,38 @@ Resources:
       TreatMissingData: breaching
       AlarmActions: !If [HasEmail, [!Ref AlertTopic], []]
       OKActions: !If [HasEmail, [!Ref AlertTopic], []]
+
+  # Traffic alarms: email long before the budget notices (budget data lags up to a day).
+  # 30k requests/hour ~ 8/s sustained, far above a few hundred users' normal load.
+  PostTrafficAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: HumanNeeded relay POST traffic unusually high (possible abuse)
+      Namespace: AWS/ApiGateway
+      MetricName: Count
+      Dimensions: [{ Name: ApiId, Value: !Ref HttpApi }]
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 30000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasEmail, [!Ref AlertTopic], []]
+
+  WsTrafficAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: HumanNeeded relay WebSocket traffic unusually high (possible abuse)
+      Namespace: AWS/ApiGateway
+      MetricName: MessageCount
+      Dimensions: [{ Name: ApiId, Value: !Ref WsApi }, { Name: Stage, Value: v1 }]
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 30000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasEmail, [!Ref AlertTopic], []]
 
   # AWS Budgets is account-wide: alerts at $5 and $20 actual monthly spend.
   Budget:

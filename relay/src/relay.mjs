@@ -6,31 +6,24 @@
 //   b#K, i#<install>   binding: h=sha256(S) hex, last=ms, ttl=s (30 d after last connect)
 //   c#K, <connId>      live connection of an authenticated install: i, ttl (3 h)
 //   x#<connId>, -      reverse map for $disconnect / unbind: k, i, ttl (3 h)
-//   r#K, <window>      POST rate counter per 5 s window: n, ttl
-// Nothing else is stored; logs never contain K, install ids or bodies.
+// Rate limits are token buckets in each warm Lambda instance's memory (free, no table writes):
+// exact while one instance serves the traffic, up to N x looser across N instances. The API stages'
+// global throttles bound the total.
+// Nothing else is stored; logs never contain K, install ids, IPs or bodies.
 import { createHash, timingSafeEqual } from 'node:crypto';
 import {
-  DynamoDBClient, GetItemCommand, PutItemCommand, DeleteItemCommand, QueryCommand, UpdateItemCommand,
+  DynamoDBClient, GetItemCommand, PutItemCommand, DeleteItemCommand, QueryCommand, 
 } from '@aws-sdk/client-dynamodb';
 import {
   ApiGatewayManagementApiClient, PostToConnectionCommand, DeleteConnectionCommand,
 } from '@aws-sdk/client-apigatewaymanagementapi';
+import { LIMITS, take } from './limits.mjs';
 
 const db = new DynamoDBClient({});
 const T = process.env.TABLE;
 const WS_ENDPOINT = process.env.WS_ENDPOINT; // https://<api>.execute-api.<region>.amazonaws.com/<stage>
 const ws = new ApiGatewayManagementApiClient({ endpoint: WS_ENDPOINT });
 
-export const LIMITS = {
-  maxBody: 512,
-  rateWindowMs: 5000, // 2/s average, burst 10: at most 10 POSTs per K per 5 s window
-  ratePerWindow: 10,
-  maxInstalls: 3,
-  bindingTtlS: 30 * 86400,
-  connTtlS: 3 * 3600,
-  helloWithinMs: 5000,
-  maxConnsPerKey: 10,
-};
 const STATES = new Set(['working', 'needs', 'done', 'idle', 'end']); // app-events §2
 const HEX = (n) => new RegExp(`^[0-9a-f]{${n}}$`);
 const K_RE = HEX(32), I_RE = HEX(32), S_RE = HEX(64), H_RE = HEX(16);
@@ -40,6 +33,8 @@ const sec = (ms) => Math.floor(ms / 1000);
 const S = (v) => ({ S: String(v) });
 const N = (v) => ({ N: String(v) });
 const sha256hex = (s) => createHash('sha256').update(s).digest('hex');
+
+const buckets = { k: new Map(), ip: new Map(), conn: new Map() };
 
 export const handler = async (event) => {
   const rc = event.requestContext || {};
@@ -69,8 +64,10 @@ export function parseState(raw) {
 
 async function onPost(event, rc) {
   const k = (event.pathParameters || {}).k || '';
+  const tooMany = { statusCode: 429, headers: { 'content-length': '0' }, body: '' };
+  if (!take(buckets.ip, rc.http?.sourceIp, LIMITS.postPerIp)) return tooMany;
   if (!K_RE.test(k)) return accepted();
-  if (!(await takeToken(k))) return { statusCode: 429, headers: { 'content-length': '0' }, body: '' };
+  if (!take(buckets.k, k, LIMITS.postPerK)) return tooMany;
   let body = event.body || '';
   if (event.isBase64Encoded) body = Buffer.from(body, 'base64').toString('utf8');
   const msg = parseState(body);
@@ -82,19 +79,6 @@ async function onPost(event, rc) {
   const data = Buffer.from(JSON.stringify(msg));
   await Promise.all((conns.Items || []).map((it) => send(it.sk.S, data, k)));
   return accepted();
-}
-
-async function takeToken(k) {
-  const t = now();
-  const w = Math.floor(t / LIMITS.rateWindowMs);
-  const r = await db.send(new UpdateItemCommand({
-    TableName: T, Key: { pk: S(`r#${k}`), sk: S(w) },
-    UpdateExpression: 'ADD n :one SET #ttl = if_not_exists(#ttl, :ttl)',
-    ExpressionAttributeNames: { '#ttl': 'ttl' },
-    ExpressionAttributeValues: { ':one': N(1), ':ttl': N(sec(t) + 120) },
-    ReturnValues: 'UPDATED_NEW',
-  }));
-  return Number(r.Attributes.n.N) <= LIMITS.ratePerWindow;
 }
 
 async function send(connId, data, k) {
@@ -118,12 +102,15 @@ async function dropConn(connId, k) {
 
 async function onWs(event, rc) {
   const id = rc.connectionId;
-  if (rc.routeKey === '$connect') return { statusCode: 200 };
+  if (rc.routeKey === '$connect') {
+    return { statusCode: take(buckets.conn, rc.identity?.sourceIp, LIMITS.connectPerIp) ? 200 : 429 };
+  }
   if (rc.routeKey === '$disconnect') {
     const x = await getX(id);
     if (x) await dropConn(id, x.k);
     return { statusCode: 200 };
   }
+  if ((event.body || '').length > LIMITS.maxWsBody) return refuse(id, 'bad_hello');
   let m = null;
   try { m = JSON.parse(event.body || ''); } catch { /* not JSON */ }
   const t = m && typeof m === 'object' ? m.t : undefined;

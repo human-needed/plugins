@@ -144,13 +144,19 @@ async def main():
 
     # Message before hello -> closed.
     early = await Pc(k).connect(hello=False)
-    await early.ws.send(json.dumps({"t": "ping"}))
+    await early.ws.send(json.dumps({"t": "unbind", "i": rnd(32)}))
     check("message before hello closes socket", await early.closed())
 
     # Hello later than 5 s -> refused.
     late = await Pc(k).connect(delay=6.0)
     m = await late.recv()
     check("hello after 5 s refused", m is not None and m.get("t") == "err", str(m))
+
+    # Oversized WebSocket message -> refused.
+    big = await Pc(k).connect(hello=False)
+    await big.ws.send(json.dumps({"t": "hello", "k": k, "i": rnd(32), "s": rnd(64), "pad": "x" * 2000}))
+    m = await big.recv()
+    check("WebSocket message > 1 KB refused", m is not None and m.get("t") == "err", str(m))
 
     # Malformed hello -> refused.
     bad = await websockets.connect(ARGS.ws, open_timeout=10)
