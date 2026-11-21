@@ -1,0 +1,11 @@
+{
+  "name": "hn-relay",
+  "private": true,
+  "type": "module",
+  "description": "Dev-only: the Lambda runtime provides the AWS SDK; this installs it for local tests.",
+  "scripts": { "test": "node tests/bucket_test.mjs && node tests/relay_test.mjs" },
+  "devDependencies": {
+    "@aws-sdk/client-apigatewaymanagementapi": "^3.700.0",
+    "@aws-sdk/client-dynamodb": "^3.700.0"
+  }
+}

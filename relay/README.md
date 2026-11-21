@@ -5,7 +5,7 @@ Spec: `pm/contracts/relay-api.md` (in the AgentAlarm project). One CloudFormatio
 - `POST https://relay.human-needed.com/v1/h/<K>` (API Gateway HTTP API) — cloud hooks. Always `202`, empty
   body; `429` over 2/s burst 10 per K, or 10/s burst 50 per IP. Invalid bodies are dropped silently.
 - `wss://relay-ws.human-needed.com/v1` (API Gateway WebSocket API) — PC app: `hello` within 5 s (answered
-  `{"t":"ok"}` when bound), `ping` (no reply, no Lambda), `check` (answered `{"t":"ok"}`), `unbind`. Connects: 10/min burst 20 per IP. Messages ≤ 1 KB.
+  `{"t":"ok"}` when bound), `ping` (no reply, no Lambda), `check` (answered `{"t":"ok"}` through the same lookup and send a POST uses, so it proves delivery), `unbind`. Connects: 10/min burst 20 per IP. Messages ≤ 1 KB.
   Up to 3 installs own a K (30 days after last connect); the relay keeps only `sha256(S)`.
 - One Lambda (`src/relay.mjs`, limits in `src/limits.mjs`) for both; rate limits are in-memory token buckets per
   warm instance. One DynamoDB table (bindings, live connection ids; TTL). Both APIs capped at 20/s, burst 40.
@@ -23,6 +23,7 @@ Deploy (sign in first with `aws login --profile humanneeded`):
 sh relay/deploy.sh cert                      # once: ACM cert + its validation records
 HN_CERT_ARN=<arn> HN_ALERT_EMAIL=<email> sh relay/deploy.sh deploy   # later runs keep previous values
 python relay/tests/relay_client.py           # contract test, both sides (pip install websockets)
+cd relay && npm install && npm test           # unit + handler tests (in-memory table)
 ```
 
 `deploy.sh` uploads the code zip to the private bucket `hn-relay-artifacts-<account>-us-east-2` (30-day expiry).
