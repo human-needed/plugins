@@ -9,7 +9,9 @@ export const LIMITS = {
   bindingTtlS: 30 * 86400,
   connTtlS: 3 * 3600,
   helloWithinMs: 5000,
-  maxConnsPerKey: 10,
+  maxConnsPerKey: 10,  // newest live connections a POST reaches (3 installs normally hold 1 each)
+  maxConnRows: 200,    // c#K rows read per lookup, live or dead
+  maxPrunePerCall: 25, // dead rows deleted per POST / check / hello
 };
 
 // ---------- in-memory token buckets ----------

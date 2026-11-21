@@ -4,7 +4,7 @@
 //   WebSocket API  $connect / $default / $disconnect   PC app: hello, unbind, ping
 // Table items (pk, sk):
 //   b#K, i#<install>   binding: h=sha256(S) hex, last=ms, ttl=s (30 d after last connect)
-//   c#K, <connId>      live connection of an authenticated install: i, ttl (3 h)
+//   c#K, <connId>      live connection of an authenticated install: i, ttl (3 h after hello)
 //   x#<connId>, -      reverse map for $disconnect / unbind: k, i, ttl (3 h)
 // Rate limits are token buckets in each warm Lambda instance's memory (free, no table writes):
 // exact while one instance serves the traffic, up to N x looser across N instances. The API stages'
@@ -12,17 +12,19 @@
 // Nothing else is stored; logs never contain K, install ids, IPs or bodies.
 import { createHash, timingSafeEqual } from 'node:crypto';
 import {
-  DynamoDBClient, GetItemCommand, PutItemCommand, DeleteItemCommand, QueryCommand, 
+  DynamoDBClient, GetItemCommand, PutItemCommand, DeleteItemCommand, QueryCommand,
 } from '@aws-sdk/client-dynamodb';
 import {
-  ApiGatewayManagementApiClient, PostToConnectionCommand, DeleteConnectionCommand,
+  ApiGatewayManagementApiClient, PostToConnectionCommand, DeleteConnectionCommand, GetConnectionCommand,
 } from '@aws-sdk/client-apigatewaymanagementapi';
 import { LIMITS, take } from './limits.mjs';
+import { pickConns } from './conns.mjs';
 
-const db = new DynamoDBClient({});
-const T = process.env.TABLE;
+let db = new DynamoDBClient({});
+let T = process.env.TABLE;
 const WS_ENDPOINT = process.env.WS_ENDPOINT; // https://<api>.execute-api.<region>.amazonaws.com/<stage>
-const ws = new ApiGatewayManagementApiClient({ endpoint: WS_ENDPOINT });
+let ws = new ApiGatewayManagementApiClient({ endpoint: WS_ENDPOINT });
+export function setClientsForTest(d, w, table = 'T') { db = d; ws = w; T = table; }
 
 const STATES = new Set(['working', 'needs', 'done', 'idle', 'end']); // app-events §2
 const HEX = (n) => new RegExp(`^[0-9a-f]{${n}}$`);
@@ -72,22 +74,45 @@ async function onPost(event, rc) {
   if (event.isBase64Encoded) body = Buffer.from(body, 'base64').toString('utf8');
   const msg = parseState(body);
   if (!msg) return accepted();
-  const conns = await db.send(new QueryCommand({
-    TableName: T, KeyConditionExpression: 'pk = :p', ExpressionAttributeValues: { ':p': S(`c#${k}`) },
-    Limit: LIMITS.maxConnsPerKey,
-  }));
-  const data = Buffer.from(JSON.stringify(msg));
-  await Promise.all((conns.Items || []).map((it) => send(it.sk.S, data, k)));
+  await deliver(k, Buffer.from(JSON.stringify(msg)));
   return accepted();
 }
+
+// Every c#K row (paged, bounded), split into the newest live ones and expired ones.
+async function connsFor(k) {
+  const items = [];
+  let start;
+  do {
+    const r = await db.send(new QueryCommand({
+      TableName: T, KeyConditionExpression: 'pk = :p', ExpressionAttributeValues: { ':p': S(`c#${k}`) },
+      ExclusiveStartKey: start, ConsistentRead: true, // a row put by this hello must show
+    }));
+    items.push(...(r.Items || []));
+    start = r.LastEvaluatedKey;
+  } while (start && items.length < LIMITS.maxConnRows);
+  return pickConns(items, now(), LIMITS.maxConnsPerKey);
+}
+
+// The one delivery path: POSTs and link checks both go through it. Sends `data` to K's live
+// connections (or only to `only`, which must be one of them) and prunes expired and gone rows.
+// Returns true when `only` was reached (or, without `only`, when any connection was).
+async function deliver(k, data, only) {
+  const { live, expired } = await connsFor(k);
+  const targets = only ? live.filter((it) => it.sk.S === only) : live;
+  const sent = await Promise.all(targets.map((it) => send(it.sk.S, data, k)));
+  await Promise.all(expired.slice(0, LIMITS.maxPrunePerCall).map((it) => dropConn(it.sk.S, k).catch(() => {})));
+  return sent.some(Boolean);
+}
+
+const isGone = (e) => e?.name === 'GoneException' || e?.$metadata?.httpStatusCode === 410;
 
 async function send(connId, data, k) {
   try {
     await ws.send(new PostToConnectionCommand({ ConnectionId: connId, Data: data }));
+    return true;
   } catch (e) {
-    if (e.name === 'GoneException' || e.$metadata?.httpStatusCode === 410) {
-      await dropConn(connId, k).catch(() => {});
-    }
+    if (isGone(e)) await dropConn(connId, k).catch(() => {});
+    return false;
   }
 }
 
@@ -121,11 +146,14 @@ async function onWs(event, rc) {
   }
   if (!x) return await refuse(id, 'bad_hello'); // anything before hello closes the socket
   if (t === 'ping') return { statusCode: 200 };
-  // Link check (replaces the PC's self-check POST): this socket is still bound to its K.
-  if (t === 'check') { await postJson(id, { t: 'ok' }); return { statusCode: 200 }; }
+  // Link check (replaces the PC's self-check POST): `ok` goes out through the same lookup and send
+  // a POST to K uses, so it arrives only if a POST would reach this socket. No `ok` -> the PC reconnects.
+  if (t === 'check') { await deliver(x.k, OK, id); return { statusCode: 200 }; }
   if (t === 'unbind') return await unbind(x, m);
   return { statusCode: 200 }; // unknown message from an authenticated PC: ignore
 }
+
+const OK = Buffer.from(JSON.stringify({ t: 'ok' }));
 
 async function getX(id) {
   const r = await db.send(new GetItemCommand({ TableName: T, Key: { pk: S(`x#${id}`), sk: S('-') } }));
@@ -176,8 +204,26 @@ async function hello(id, rc, m) {
     db.send(new PutItemCommand({ TableName: T, Item: { pk: S(`c#${k}`), sk: S(id), i: S(i), ttl } })),
     db.send(new PutItemCommand({ TableName: T, Item: { pk: S(`x#${id}`), sk: S('-'), k: S(k), i: S(i), ttl } })),
   ]);
-  await postJson(id, { t: 'ok' }); // bound: states for K now reach this socket
+  await pruneConns(k, id);
+  // bound: states for K now reach this socket. Sent through the POST path, like a check.
+  await deliver(k, OK, id);
   return { statusCode: 200 };
+}
+
+// At hello: drop K's expired rows, and rows whose socket API Gateway no longer has (missed $disconnect).
+async function pruneConns(k, self) {
+  const { live, expired, extra } = await connsFor(k);
+  const others = [...live, ...extra].filter((it) => it.sk.S !== self).slice(0, LIMITS.maxPrunePerCall);
+  await Promise.all([
+    ...expired.slice(0, LIMITS.maxPrunePerCall).map((it) => dropConn(it.sk.S, k).catch(() => {})),
+    ...others.map(async (it) => {
+      try {
+        await ws.send(new GetConnectionCommand({ ConnectionId: it.sk.S }));
+      } catch (e) {
+        if (isGone(e)) await dropConn(it.sk.S, k).catch(() => {});
+      }
+    }),
+  ]);
 }
 
 async function unbind(x, m) {
