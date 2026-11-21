@@ -1,9 +1,10 @@
-# HumanNeeded plugins
+# HUMAN_NEEDED plugins
 
 [![tests](https://github.com/human-needed/plugins/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/human-needed/plugins/actions/workflows/test.yml)
 
-Agent integrations for the [HumanNeeded](https://human-needed.com) puck: a USB desk light that
-glows and chimes when your AI coding agent is working, done, or needs you.
+Stop watching your AI agent work. With the free [HUMAN_NEEDED app](https://github.com/human-needed/app),
+the edges of your screen glow and a chime plays when Claude, Codex or Cursor is done or needs you.
+These plugins tell the app what the agent is doing.
 
 ## Install
 
@@ -15,17 +16,18 @@ Setup steps live on the website only:
 
 ## How it works
 
-The HumanNeeded app owns the puck. Each integration POSTs the agent's hook JSON to the app on the
-same computer (`http://127.0.0.1:24816/v1/event/<agent>/<state>`). If the app isn't running,
-nothing happens. In Claude cloud sessions (Cowork),
-[`cloud/hn-cloud.sh`](plugins/claude/cloud/hn-cloud.sh) sends each state through the HumanNeeded
-relay instead; on your own computer it does nothing.
+Each plugin sends the agent's hook events to the app on the same computer
+(`http://127.0.0.1:24816/v1/event/<agent>/<state>`) with the OS's built-in curl. If the app isn't
+running, nothing happens. In Claude cloud sessions (Cowork),
+[`cloud/hn-cloud.sh`](plugins/claude/cloud/hn-cloud.sh) sends only the state, a hashed chat id and a
+timestamp through the HUMAN_NEEDED relay instead; on your own computer it does nothing. Details:
+[plugins/claude/README.md](plugins/claude/README.md).
 
 ## Layout
 
 ```
 .claude-plugin/marketplace.json   Claude Code marketplace (this repo)
-plugins/claude/                   Claude Code plugin "humanneeded": HTTP hooks, cloud hook, skill
+plugins/claude/                   Claude plugin "humanneeded": curl hooks, cloud hook, skill, README, LICENSE
 plugins/codex/                    Codex plugin "humanneeded" (.codex-plugin/, hooks.json: curl, assets/icon.png)
 docs/images/                      annotated screenshot sources for the site guides (the site serves its own copies)
 .agents/plugins/marketplace.json  Codex marketplace (this repo)
