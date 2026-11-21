@@ -16,7 +16,8 @@ isn't running, the plugin does nothing and never slows Claude down.
 In Claude Code you can also install it with:
 
 ```
-/plugin install humanneeded --marketplace human-needed/plugins
+/plugin marketplace add human-needed/plugins
+/plugin install humanneeded@humanneeded
 ```
 
 ## What it sends, and where
