@@ -10,7 +10,7 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync
 import { tmpdir } from "node:os";
 import { join, dirname, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
-import { OUTPUTS, PORT, eventUrl } from "../tools/gen-hooks.mjs";
+import { OUTPUTS, PORT, eventUrl, claudeCurlArgs } from "../tools/gen-hooks.mjs";
 import { startHub } from "./fake-hub.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -58,6 +58,8 @@ const URL_RE = /http:\/\/127\.0\.0\.1:24816\/v1\/event\/([a-z0-9-]+)\/(working|n
 function what(e) {
   if (e.h.type === "http") { const m = e.h.url.match(URL_RE); return m && e.h.url === m[0] ? { kind: "http", agent: m[1], state: m[2] } : { kind: "?" }; }
   if (e.h.command === "sh") return { kind: "cloud", state: e.h.args[1] };
+  if (e.h.command === "curl" && Array.isArray(e.h.args)) { // Claude: exec-form curl (app-events 2.3)
+    const u = e.h.args.at(-1), m = u.match(URL_RE); return m && u === m[0] ? { kind: "exec", agent: m[1], state: m[2] } : { kind: "?" }; }
   const m = (e.h.command ?? "").match(URL_RE);
   return m ? { kind: "curl", agent: m[1], state: m[2] } : { kind: "?" };
 }
@@ -79,7 +81,12 @@ for (const [agent, rels] of Object.entries(FILES)) {
       if (!(got[e.ev] ??= []).includes(w.state)) got[e.ev].push(w.state);
       const m = MATCHERS[`${agent}:${e.ev}`];
       if (m) ok(e.matcher === m, `${agent} ${e.ev}: matcher ${m}`, e.matcher);
-      if (w.kind === "http") ok(e.h.timeout === 1 && !("headers" in e.h), `${rel} ${e.ev}: http hook, timeout 1 s`);
+      ok(e.h.type !== "http", `${rel} ${e.ev}: no http hooks (directory: https only)`);
+      if (w.kind === "exec") {
+        ok(e.h.async === true && e.h.timeout === 1 && !("shell" in e.h), `${rel} ${e.ev}: exec curl, async, timeout 1 s`);
+        ok(eq(e.h.args, claudeCurlArgs(w.state)) && e.h.args.every((a) => !/[$*?`]/.test(a)),
+           `${rel} ${e.ev}: curl args (no variables, wildcards or substitutions)`, JSON.stringify(e.h.args));
+      }
       if (w.kind === "curl") {
         const cmds = [e.h.command, e.h.commandWindows].filter(Boolean);
         for (const c of cmds) {
@@ -107,7 +114,7 @@ for (const e of ALL["plugins/claude/hooks/hooks.json"]) {
      e.h.async === true && !("cloud" in e.h), `claude ${e.ev}: cloud hook -> ${w.state}`);
 }
 // Only documented hook fields: Claude's plugin sync strips (and warns about) anything else.
-const DOC = { http: ["type", "url", "timeout"], command: ["type", "command", "args", "async", "timeout"] };
+const DOC = { command: ["type", "command", "args", "async", "timeout"] };
 for (const e of ALL["plugins/claude/hooks/hooks.json"])
   ok(Object.keys(e.h).every((k) => DOC[e.h.type]?.includes(k)), `claude ${e.ev}: only documented hook fields`, Object.keys(e.h).join(","));
 ok(ALL["plugins/claude/hooks/hooks.json"].filter((e) => what(e).kind === "cloud").length === Object.keys(CONTRACT.claude).length,
@@ -186,6 +193,20 @@ console.log("2. curl hooks against a stand-in hub (Codex, Cursor)");
        rec.headers["content-type"] === "application/json" && rec.headers.host === `127.0.0.1:${PORT}` &&
        !rec.headers.origin && rec.body === input && rec.bytes === Buffer.byteLength(input),
        `${rel} ${e.ev}: POST /v1/event/${w.agent}/${w.state} with the exact hook bytes, past a dead proxy`, JSON.stringify(rec));
+  }
+  // Claude: exec form, spawned like Claude Code does (no shell): curl + args, hook JSON on stdin.
+  for (const e of ALL["plugins/claude/hooks/hooks.json"].filter((x) => what(x).kind === "exec")) {
+    const w = what(e), input = JSON.stringify({ session_id: `c-${++i}`, hook_event_name: e.ev, prompt: "é 日本 ✓" });
+    const n = recs.length, t = Date.now();
+    const r = await new Promise((res) => {
+      const p = spawn(e.h.command, e.h.args, { env: deadProxy }); let out = "";
+      p.stdout.on("data", (d) => (out += d)); p.stderr.on("data", (d) => (out += d));
+      p.on("close", (code) => res({ code, out, ms: Date.now() - t })); p.stdin.on("error", () => {}); p.stdin.end(input);
+    });
+    const rec = recs[n];
+    ok(r.code === 0 && r.out === "", `claude ${e.ev}: exec curl exit 0, prints nothing (${r.ms} ms)`, JSON.stringify(r));
+    ok(rec?.path === `/v1/event/claude/${w.state}` && rec.body === input && rec.headers["content-type"] === "application/json",
+       `claude ${e.ev}: POST /v1/event/claude/${w.state} with the exact hook bytes, past a dead proxy`, JSON.stringify(rec));
   }
   // Windows: a PowerShell profile or host that sets $OutputEncoding to UTF-8 (with BOM) must not
   // change what is sent (it did with `$input | curl.exe`: CI run 43658194923).

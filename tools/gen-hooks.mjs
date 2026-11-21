@@ -3,7 +3,7 @@
 //
 // D-047: the HumanNeeded app is a local HTTP hub. Every event is
 //   POST http://127.0.0.1:24816/v1/event/<agent>/<state>   body = the agent's hook JSON
-// Claude uses native HTTP hooks; Codex and Cursor pipe stdin into the OS's built-in curl.
+// Every agent pipes the hook JSON into the OS's built-in curl.
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,24 +56,27 @@ export const curlPosix = (agent, state) =>
 export const curlWindows = (agent, state) =>
   `curl.exe ${CURL_OPTS.replace("{NULL}", "NUL").replace("{AT}", "'@-'")} ${eventUrl(agent, state)}; exit 0`;
 
-// Claude Code: native HTTP hooks (no process at all on the PC). HTTP hooks are always
-// synchronous in Claude Code (async is ignored), so keep the timeout at 1 s; the app must
-// answer at once. The second entry does its work only in cloud VMs: cloud/hn-cloud.sh checks the
-// environment itself (CLAUDE_CODE_REMOTE / CLAUDE_CODE_ENTRYPOINT) and exits at once anywhere else.
-// The HTTP hook in a VM hits nothing and fails in ms. Only documented hook fields (no "cloud").
+// Claude Code: exec-form command hooks (`command` + `args`: spawned directly, no shell) running the
+// OS's built-in curl (macOS, Linux, Windows 10 1803+ System32\curl.exe). curl reads the hook JSON from
+// stdin. Directory rule (app-events 2.3): no http:// hooks, no variables, no inline code. All async: never
+// blocks Claude; ≤ 1 s (0.3 s connect, 1 s total); no proxy for 127.0.0.1; the app answers 204 (no body).
+// The second entry does its work only in cloud VMs: cloud/hn-cloud.sh checks the environment itself
+// (CLAUDE_CODE_REMOTE / CLAUDE_CODE_ENTRYPOINT) and exits at once anywhere else. Only documented fields.
+export const claudeCurlArgs = (state) => ["-s", "--connect-timeout", "0.3", "-m", "1", "--noproxy", "127.0.0.1",
+  "-H", "Content-Type: application/json", "--data-binary", "@-", eventUrl("claude", state)];
 function claude() {
   const hooks = {};
   for (const [ev, matcher, state] of MAPPING.claude) {
     const group = {};
     if (matcher) group.matcher = matcher;
     group.hooks = [
-      { type: "http", url: eventUrl("claude", state), timeout: 1 },
+      { type: "command", command: "curl", args: claudeCurlArgs(state), async: true, timeout: 1 },
       { type: "command", command: "sh", args: ["${CLAUDE_PLUGIN_ROOT}/cloud/hn-cloud.sh", state],
         async: true, timeout: 5 },
     ];
     (hooks[ev] ??= []).push(group);
   }
-  return { description: "HumanNeeded: reports Claude's state to the HumanNeeded app (local HTTP) or, in cloud sessions, to the relay.", hooks };
+  return { description: "HumanNeeded: reports Claude's state to the HumanNeeded app (local, via curl) or, in cloud sessions, to the relay.", hooks };
 }
 
 // Codex: ~/.codex/hooks.json. `command` for macOS/Linux, `commandWindows` for Windows.

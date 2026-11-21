@@ -1,12 +1,27 @@
 {
-  "description": "HumanNeeded: reports Claude's state to the HumanNeeded app (local HTTP) or, in cloud sessions, to the relay.",
+  "description": "HumanNeeded: reports Claude's state to the HumanNeeded app (local, via curl) or, in cloud sessions, to the relay.",
   "hooks": {
     "UserPromptSubmit": [
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:24816/v1/event/claude/working",
+            "type": "command",
+            "command": "curl",
+            "args": [
+              "-s",
+              "--connect-timeout",
+              "0.3",
+              "-m",
+              "1",
+              "--noproxy",
+              "127.0.0.1",
+              "-H",
+              "Content-Type: application/json",
+              "--data-binary",
+              "@-",
+              "http://127.0.0.1:24816/v1/event/claude/working"
+            ],
+            "async": true,
             "timeout": 1
           },
           {
@@ -27,8 +42,23 @@
         "matcher": "*",
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:24816/v1/event/claude/working",
+            "type": "command",
+            "command": "curl",
+            "args": [
+              "-s",
+              "--connect-timeout",
+              "0.3",
+              "-m",
+              "1",
+              "--noproxy",
+              "127.0.0.1",
+              "-H",
+              "Content-Type: application/json",
+              "--data-binary",
+              "@-",
+              "http://127.0.0.1:24816/v1/event/claude/working"
+            ],
+            "async": true,
             "timeout": 1
           },
           {
@@ -49,8 +79,23 @@
         "matcher": "permission_prompt|idle_prompt",
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:24816/v1/event/claude/needs",
+            "type": "command",
+            "command": "curl",
+            "args": [
+              "-s",
+              "--connect-timeout",
+              "0.3",
+              "-m",
+              "1",
+              "--noproxy",
+              "127.0.0.1",
+              "-H",
+              "Content-Type: application/json",
+              "--data-binary",
+              "@-",
+              "http://127.0.0.1:24816/v1/event/claude/needs"
+            ],
+            "async": true,
             "timeout": 1
           },
           {
@@ -71,8 +116,23 @@
         "matcher": "*",
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:24816/v1/event/claude/needs",
+            "type": "command",
+            "command": "curl",
+            "args": [
+              "-s",
+              "--connect-timeout",
+              "0.3",
+              "-m",
+              "1",
+              "--noproxy",
+              "127.0.0.1",
+              "-H",
+              "Content-Type: application/json",
+              "--data-binary",
+              "@-",
+              "http://127.0.0.1:24816/v1/event/claude/needs"
+            ],
+            "async": true,
             "timeout": 1
           },
           {
@@ -93,8 +153,23 @@
         "matcher": "AskUserQuestion|mcp__computer-use__request_access|mcp__computer-use__request_teach_access",
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:24816/v1/event/claude/needs",
+            "type": "command",
+            "command": "curl",
+            "args": [
+              "-s",
+              "--connect-timeout",
+              "0.3",
+              "-m",
+              "1",
+              "--noproxy",
+              "127.0.0.1",
+              "-H",
+              "Content-Type: application/json",
+              "--data-binary",
+              "@-",
+              "http://127.0.0.1:24816/v1/event/claude/needs"
+            ],
+            "async": true,
             "timeout": 1
           },
           {
@@ -114,8 +189,23 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:24816/v1/event/claude/done",
+            "type": "command",
+            "command": "curl",
+            "args": [
+              "-s",
+              "--connect-timeout",
+              "0.3",
+              "-m",
+              "1",
+              "--noproxy",
+              "127.0.0.1",
+              "-H",
+              "Content-Type: application/json",
+              "--data-binary",
+              "@-",
+              "http://127.0.0.1:24816/v1/event/claude/done"
+            ],
+            "async": true,
             "timeout": 1
           },
           {
@@ -135,8 +225,23 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:24816/v1/event/claude/end",
+            "type": "command",
+            "command": "curl",
+            "args": [
+              "-s",
+              "--connect-timeout",
+              "0.3",
+              "-m",
+              "1",
+              "--noproxy",
+              "127.0.0.1",
+              "-H",
+              "Content-Type: application/json",
+              "--data-binary",
+              "@-",
+              "http://127.0.0.1:24816/v1/event/claude/end"
+            ],
+            "async": true,
             "timeout": 1
           },
           {
