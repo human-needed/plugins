@@ -4,12 +4,12 @@
     "name": "HUMAN_NEEDED",
     "url": "https://human-needed.com"
   },
-  "description": "HUMAN_NEEDED plugins for Claude, Codex and Cursor. https://human-needed.com",
+  "description": "HUMAN_NEEDED plugins for Claude, Codex and Cursor. Get the free app: https://github.com/human-needed/app",
   "plugins": [
     {
       "name": "humanneeded",
       "source": "./plugins/claude",
-      "description": "Shows when Claude is working, done, or needs you: a glow on your screen edge, a sound, and the optional Puck. Needs the free HumanNeeded app: https://human-needed.com"
+      "description": "Shows when Claude is working, done, or needs you: a glow on your screen edge, a sound, and the optional Puck. Needs the free HUMAN_NEEDED app: https://github.com/human-needed/app"
     }
   ]
 }

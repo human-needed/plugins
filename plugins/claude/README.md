@@ -10,7 +10,7 @@ VS Code.
 ## You need the free app
 
 The plugin only reports Claude's state. The free HUMAN_NEEDED app shows the glow and plays the
-sound. Get it and follow the setup steps at https://human-needed.com/start/claude/. If the app
+sound. Download and install it from https://github.com/human-needed/app. If the app
 isn't running, the plugin does nothing and never slows Claude down.
 
 In Claude Code you can also install it with:
