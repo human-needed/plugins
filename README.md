@@ -8,11 +8,17 @@ These plugins tell the app what the agent is doing.
 
 ## Install
 
-Setup steps live on the website only:
+1. Download and install the free app from https://github.com/human-needed/app
+   ([latest release](https://github.com/human-needed/app/releases/latest)).
+2. Add the plugin for your agent. In Claude Code:
 
-- Claude (Code tab, Cowork, CLI): https://human-needed.com/start/claude/
-- Codex: https://human-needed.com/start/codex/
-- Cursor: https://human-needed.com/start/cursor/
+   ```
+   /plugin marketplace add human-needed/plugins
+   /plugin install humanneeded@humanneeded
+   ```
+
+   Codex and Cursor: add the marketplace `human-needed/plugins` in the app's plugin settings and
+   install HUMAN_NEEDED.
 
 ## How it works
 

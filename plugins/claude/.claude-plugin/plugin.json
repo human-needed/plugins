@@ -1,14 +1,15 @@
 {
   "name": "humanneeded",
   "displayName": "HUMAN_NEEDED",
-  "version": "2.1.0",
-  "description": "Shows when Claude is working, done, or needs you: a glow on your screen edge, a sound, and the optional Puck. Needs the free HumanNeeded app: https://human-needed.com",
+  "version": "2.1.1",
+  "description": "Shows when Claude is working, done, or needs you: a glow on your screen edge, a sound, and the optional Puck. Needs the free HUMAN_NEEDED app: https://github.com/human-needed/app",
   "author": {
     "name": "HUMAN_NEEDED",
     "url": "https://human-needed.com"
   },
-  "homepage": "https://human-needed.com/start/",
+  "homepage": "https://github.com/human-needed/app",
   "repository": "https://github.com/human-needed/plugins",
+  "icon": "./assets/icon.png",
   "license": "FSL-1.1-ALv2",
   "network": {
     "hosts": [
